@@ -9,22 +9,26 @@ import os
 import logging
 from pathlib import Path
 
+# src/mlx_gui/app_main.py
+
+import logging
+import rumps
+import sys
+
 def setup_app_environment():
     """Setup the environment for the macOS app bundle."""
     # Get the app bundle path
     if hasattr(sys, 'frozen') and sys.frozen:
         # Running as app bundle
         app_bundle_path = Path(sys.executable).parent.parent
-        resources_path = app_bundle_path / "Resources"
-        
-        # Add the Resources directory to Python path
-        sys.path.insert(0, str(resources_path))
-        
+        # No need to manually add Resources to sys.path; PyInstaller handles it.
+        # Removing this avoids duplicate module imports that caused nanobind errors.
+
         # Set up logging to file in user's home directory
         log_dir = Path.home() / "Library" / "Logs" / "MLX-GUI"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "mlx-gui.log"
-        
+
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -33,7 +37,7 @@ def setup_app_environment():
                 logging.StreamHandler()
             ]
         )
-        
+
         print("""
 ███╗   ███╗██╗     ██╗  ██╗      ██████╗ ██╗   ██╗██╗
 ████╗ ████║██║     ╚██╗██╔╝     ██╔════╝ ██║   ██║██║
@@ -50,7 +54,7 @@ def setup_app_environment():
         print()
         print(f"MLX-GUI App Bundle starting...")
         print(f"Logs: {log_file}")
-        
+
     else:
         # Running in development
         logging.basicConfig(level=logging.INFO)
@@ -75,7 +79,7 @@ def main():
     try:
         # Setup the environment
         setup_app_environment()
-        
+
         # Test if we can import rumps
         try:
             import rumps
@@ -83,12 +87,12 @@ def main():
         except ImportError as e:
             print(f"Failed to import rumps: {e}")
             sys.exit(1)
-        
+
         # Import and run the tray app
         from mlx_gui.tray import run_tray_app
-        
+
         print("Starting MLX-GUI tray app...")
-        
+
         # Check for audio dependencies
         audio_modules = []
         try:
@@ -96,27 +100,27 @@ def main():
             audio_modules.append("MLX-Whisper")
         except ImportError:
             pass
-        
+
         try:
             import parakeet_mlx
             audio_modules.append("Parakeet-MLX")
         except ImportError:
             pass
-        
+
         if audio_modules:
             print(f"Audio support: ✅ {', '.join(audio_modules)} available")
         else:
             print("Audio support: ⚠️  No audio libraries found")
             print("Install with: pip install mlx-whisper parakeet-mlx")
             print("MLX-GUI will work without audio support, but audio transcription won't be available.")
-        
+
         # Start with default settings
         success = run_tray_app(port=8000, host="127.0.0.1")
-        
+
         if not success:
             print("Failed to start MLX-GUI tray app")
             sys.exit(1)
-            
+
     except KeyboardInterrupt:
         print("\nMLX-GUI shutting down...")
         sys.exit(0)
@@ -128,4 +132,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main() 
+    main()

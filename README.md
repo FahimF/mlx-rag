@@ -25,24 +25,32 @@
 
 ## 📦 Latest Release
 
-### v1.1.0 - Vision Models & Enhanced Compatibility (July 10, 2025)
+### v1.2.0 - Advanced Memory Management & VLM Stability (January 2025)
 
-🎯 **Major Vision Model Support Added**
-- ✅ **MLX-VLM Integration** - Full support for vision/multimodal models
-- 🖼️ **Image Understanding** - Gemma-3n, Qwen2-VL, LLaVA models now working perfectly
-- 🔧 **Fixed MLX-VLM Queue Issues** - Resolved image token handling for all vision models
-- 📸 **OpenAI-Compatible Images** - Send images via base64 or URLs in chat completions
+🧠 **Revolutionary Memory Management**
+- ✅ **Intelligent Auto-Unload System** - Automatically unloads oldest models when memory limits are reached
+- 🔄 **Three-Layer Memory Protection** - Proactive cleanup, concurrent limits, and emergency memory recovery
+- ⚡ **Memory Error Detection** - Detects MLX memory errors and retries with automatic model unloading
+- 📊 **Smart LRU Eviction** - Least Recently Used models are automatically freed to make room for new ones
+- 🛡️ **Memory Overload Recovery** - Up to 3 retry attempts with intelligent memory cleanup between attempts
+- ⚡️ **Core Updates** - Updated to MLX-LM 0.26.0 and MLX-VLM 0.3.1
 
-🚀 **Enhanced Features**
-- 📊 **Text Embeddings** - Full OpenAI-compatible embeddings API with queuing support
-- ⚡ **Improved Queue System** - Robust handling of text, audio, vision, and embedding requests
-- 🔄 **Auto-Model Detection** - Automatically detects and handles different model types
-- 🎨 **Better Error Handling** - Clear memory requirement warnings and compatibility checks
+🔧 **Enhanced VLM Stability**
+- 🖼️ **Fixed Vision Model Queue Issues** - Resolved concurrent loading problems with MLX-VLM models
+- 🎯 **Improved Image Token Handling** - Better processing of vision inputs in queue system
+- 🔄 **Robust Multimodal Support** - Enhanced stability for Gemma-3n, Qwen2-VL, and LLaVA models
+- 📸 **Optimized Memory Usage** - Better memory management for large vision models
 
-🛠️ **Technical Improvements**
-- 🏗️ **Unified MLX Integration** - Consistent handling across MLX-LM, MLX-Whisper, and MLX-VLM
-- 📱 **Updated Build System** - Standalone app now includes full vision model support
-- 🔍 **Enhanced Discovery** - Better model categorization and compatibility detection
+🚀 **Performance Improvements**
+- ⚡ **Faster Model Loading** - Optimized queue processing with better error handling
+- 🏗️ **Enhanced Concurrent Processing** - Improved handling of multiple simultaneous requests
+- 📈 **Better Resource Utilization** - Smarter memory allocation and cleanup strategies
+- 🔍 **Comprehensive Testing** - Added memory overload tests and queue verification
+
+🛠️ **Technical Enhancements**
+- 🧪 **Advanced Testing Suite** - New memory management tests and VLM stability verification
+- 📝 **Improved Logging** - Better visibility into memory management and model lifecycle
+- 🔧 **Enhanced Error Recovery** - More robust handling of edge cases and memory constraints
 
 **Download:** [Latest Release](https://github.com/RamboRogers/mlx-gui/releases/latest)
 
@@ -73,13 +81,14 @@
 ## 🚀 Features
 
 - **🧠 MLX Engine Integration** - Native Apple Silicon acceleration via MLX
-- **🔄 Dynamic Model Loading** - Load/unload models on-demand with memory management
+- **🔄 Intelligent Memory Management** - Advanced auto-unload system with LRU eviction and memory error recovery
+- **🛡️ Three-Layer Memory Protection** - Proactive cleanup, concurrent limits, and emergency memory recovery
 - **🌐 REST API Server** - Complete API for model management and inference
 - **🎨 Beautiful Admin Interface** - Modern web GUI for model management
-- **📊 System Monitoring** - Real-time memory usage and system status
+- **📊 System Monitoring** - Real-time memory usage and system status with memory warnings
 - **🔍 HuggingFace Integration** - Discover and install MLX-compatible models
 - **🎙️ Audio Support** - Speech-to-text with Whisper and Parakeet models
-- **🖼️ Vision Models** - Image understanding with Gemma-3n, Qwen2-VL, LLaVA models
+- **🖼️ Vision Models** - Image understanding with Gemma-3n, Qwen2-VL, LLaVA models (enhanced stability)
 - **🔢 Embeddings Support** - Text embeddings with OpenAI-compatible API
 - **🍎 macOS System Tray** - Native menu bar integration
 - **⚡ OpenAI Compatibility** - Drop-in replacement for OpenAI API

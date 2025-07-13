@@ -23,7 +23,7 @@ pip install pyinstaller
 
 # Check for critical dependencies
 echo "🔍 Checking critical dependencies..."
-CRITICAL_DEPS=("mlx-lm" "mlx" "rumps" "fastapi" "uvicorn" "transformers" "huggingface-hub" "mlx-whisper" "parakeet-mlx" "mlx-vlm")
+CRITICAL_DEPS=("mlx-lm" "mlx" "rumps" "fastapi" "uvicorn" "transformers" "huggingface-hub" "mlx-whisper" "parakeet-mlx" "mlx-vlm" "timm" "torchvision")
 MISSING_DEPS=""
 
 for dep in "${CRITICAL_DEPS[@]}"; do
@@ -37,7 +37,7 @@ if [ -n "$MISSING_DEPS" ]; then
     echo "💡 Install with: pip install -e \".[app,audio,vision]\""
     echo "💡 Or from requirements: pip install -r requirements.txt"
     echo "💡 For audio support: pip install mlx-whisper parakeet-mlx"
-    echo "💡 For vision support: pip install mlx-vlm"
+    echo "💡 For vision support: pip install mlx-vlm timm torchvision"
     exit 1
 fi
 
@@ -49,6 +49,11 @@ pip install parakeet-mlx -U
 pip install av -U
 pip install ffmpeg-binaries -U
 pip install mlx-vlm -U
+pip install mlx-lm -U
+pip install timm -U
+pip install torchvision -U
+# Replace full OpenCV with headless build to avoid crypto conflicts
+pip install opencv-python-headless -U
 
 # Clean previous builds
 echo "🧹 Cleaning previous builds..."
@@ -61,7 +66,7 @@ echo "🎨 Creating app icon from ./icon.png..."
 if [ -f "./icon.png" ]; then
     # Create iconset directory
     mkdir -p app_icon.iconset
-    
+
     # Generate different icon sizes using sips (built into macOS)
     sips -z 16 16 ./icon.png --out app_icon.iconset/icon_16x16.png
     sips -z 32 32 ./icon.png --out app_icon.iconset/icon_16x16@2x.png
@@ -73,13 +78,13 @@ if [ -f "./icon.png" ]; then
     sips -z 512 512 ./icon.png --out app_icon.iconset/icon_256x256@2x.png
     sips -z 512 512 ./icon.png --out app_icon.iconset/icon_512x512.png
     sips -z 1024 1024 ./icon.png --out app_icon.iconset/icon_512x512@2x.png
-    
+
     # Convert to icns format
     iconutil -c icns app_icon.iconset -o app_icon.icns
-    
+
     # Clean up temporary iconset
     rm -rf app_icon.iconset
-    
+
     echo "✅ App icon created: app_icon.icns"
 else
     echo "⚠️  Warning: ./icon.png not found, using default icon"
@@ -100,39 +105,12 @@ mkdir -p hooks
 
 # Create custom hook for parakeet-mlx
 cat > hooks/hook-parakeet_mlx.py << 'EOF'
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 datas, binaries, hiddenimports = collect_all('parakeet_mlx')
 
-# Additional hidden imports for parakeet-mlx and its dependencies
-hiddenimports += [
-    'parakeet_mlx.stt',
-    'parakeet_mlx.models', 
-    'parakeet_mlx.utils',
-    'parakeet_mlx.alignment',
-    'parakeet_mlx.attention',
-    'parakeet_mlx.audio',
-    'parakeet_mlx.cache',
-    'parakeet_mlx.conformer',
-    'parakeet_mlx.ctc',
-    'parakeet_mlx.rnnt',
-    'parakeet_mlx.tokenizer',
-    'dacite',
-    'librosa',
-    'librosa.core',
-    'librosa.feature',
-    'librosa.util',
-    'typer',
-    'audiofile',
-    'audiofile.core',
-    'audresample',
-    'audmath',
-    'audeer',
-    'soundfile',
-    'soxr',
-    'numba',
-    'llvmlite',
-]
+# Bundle all submodules so STT works out of the box
+hiddenimports.extend(collect_submodules('parakeet_mlx'))
 EOF
 
 # Create custom hook for audiofile
@@ -211,6 +189,65 @@ hiddenimports += [
 ]
 EOF
 
+# Create custom hook for transformers to ensure all processor modules are included
+cat > hooks/hook-transformers.py << 'EOF'
+from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+# The "Sledgehammer" approach: collect EVERYTHING from transformers.
+# This is the most robust way to ensure all dynamic modules, models,
+# and processors are included, preventing "Could not import module" errors.
+
+datas, binaries, hiddenimports = collect_all('transformers')
+
+# Recursively collect all submodules. This is the key to solving the problem.
+hiddenimports.extend(collect_submodules('transformers'))
+
+print("✅ Aggressive transformers hook: All submodules collected.")
+EOF
+
+# Create cv2 hook that filters out SSL/crypto libraries that conflict with Python
+cat > hooks/hook-cv2.py << 'EOF'
+from PyInstaller.utils.hooks import collect_all
+
+# Collect cv2 but filter out problematic crypto libraries
+datas, binaries, hiddenimports = collect_all('cv2')
+
+# Filter out specific SSL/crypto libraries that conflict with Python's SSL
+problematic_libs = [
+    'libcrypto.3.dylib',
+    'libssl.3.dylib',
+    'libmbedcrypto.3.5.1.dylib',
+    'libcrypto',
+    'libssl',
+    'crypto.3',
+    'ssl.3'
+]
+
+filtered_binaries = []
+for src, dest in binaries:
+    # Check if this binary contains any problematic libraries
+    skip = False
+    for lib in problematic_libs:
+        if lib in src:
+            print(f"🔧 Filtering out problematic crypto library: {src}")
+            skip = True
+            break
+
+    if not skip:
+        filtered_binaries.append((src, dest))
+
+binaries = filtered_binaries
+
+# Essential cv2 imports for transformers and basic vision functionality
+hiddenimports += [
+    'cv2',
+    'cv2.cv2',
+    'numpy',
+]
+
+print(f"✅ OpenCV hook: filtered {len(binaries) - len(filtered_binaries)} problematic libraries")
+EOF
+
 # Create custom hook for mlx-vlm
 cat > hooks/hook-mlx_vlm.py << 'EOF'
 from PyInstaller.utils.hooks import collect_all
@@ -229,233 +266,192 @@ hiddenimports += [
     'mlx_vlm.models.qwen2_vl',
     'mlx_vlm.models.llava',
     'mlx_vlm.models.idefics',
+    'timm',
+    'timm.models',
+    'timm.models.vision_transformer',
+    'timm.models.convnext',
+    'timm.models.swin_transformer',
+    'timm.layers',
+    'timm.data',
+    'torchvision',
+    'torchvision.transforms',
+    'torchvision.models',
 ]
 EOF
 
-# Create runtime hook for ffmpeg-binaries to ensure FFmpeg is in PATH
-mkdir -p rthooks
-cat > rthooks/pyi_rth_ffmpeg_binaries.py << 'EOF'
-"""
-PyInstaller runtime hook to initialize FFmpeg binaries from the
-`ffmpeg-binaries` package (imported as `ffmpeg`).
-This guarantees the bundled FFmpeg is added to PATH so libraries like
-parakeet_mlx can find it when the app is launched from Finder.
-"""
-import os, shutil
+# Create custom hook for mlx to ensure internal helper modules are bundled without duplicating the core lib
+cat > hooks/hook-mlx.py << 'EOF'
+from PyInstaller.utils.hooks import collect_all
 
-def _setup_ffmpeg() -> None:
-    try:
-        import ffmpeg  # provided by ffmpeg-binaries
-        ffmpeg.init()
-        ffmpeg.add_to_path()
-        bin_path = getattr(ffmpeg, 'FFMPEG_PATH', None)
-        if bin_path and os.path.exists(bin_path):
-            os.environ.setdefault('FFMPEG_BINARY', bin_path)
-            found = shutil.which('ffmpeg')
-            print(f"✅ FFmpeg initialized -> {found or bin_path}")
-        else:
-            print("⚠️  FFmpeg binary path not found after initialization")
-    except Exception as exc:  # pragma: no cover
-        print(f"⚠️  ffmpeg-binaries setup error: {exc}")
+datas, binaries, hiddenimports = collect_all('mlx')
 
-_setup_ffmpeg()
+# Explicitly include lazy-imported helpers
+hiddenimports += [
+    'mlx._reprlib_fix',
+    'mlx._os_warning',
+]
 EOF
 
-# Create runtime hook to fix SSL/crypto library conflicts and prevent MLX duplication
-mkdir -p rthooks
-cat > rthooks/pyi_rth_mlx_fix.py << 'EOF'
-import os
+# Create a temporary directory for runtime hooks
+HOOKS_DIR="rthooks"
+mkdir -p "$HOOKS_DIR"
+
+# Path for the consolidated runtime hook
+ALL_FIXES_HOOK="$HOOKS_DIR/pyi_rth_all_fixes.py"
+
+# Create the consolidated runtime hook file
+echo "Creating consolidated runtime hook: $ALL_FIXES_HOOK"
+cat > "$ALL_FIXES_HOOK" << EOL
+# rthooks/pyi_rth_all_fixes.py
+# This file is dynamically generated by build_app.sh
+
 import sys
+import os
 
-# Fix SSL/crypto library conflicts by ensuring system libraries are prioritized
-if hasattr(sys, '_MEIPASS'):
-    # We're running in a PyInstaller bundle
-    dylib_path = os.path.join(sys._MEIPASS, 'lib-dynload')
-    if os.path.exists(dylib_path):
-        # Remove problematic cv2 dylib paths from environment
-        if 'DYLD_LIBRARY_PATH' in os.environ:
-            paths = os.environ['DYLD_LIBRARY_PATH'].split(':')
-            filtered_paths = [p for p in paths if 'cv2' not in p and 'opencv' not in p]
-            os.environ['DYLD_LIBRARY_PATH'] = ':'.join(filtered_paths)
-    
-    # Setup av package's libav libraries for Python audio processing
-    av_dylib_dir = os.path.join(sys._MEIPASS, 'av', '__dot__dylibs')
-    if os.path.exists(av_dylib_dir):
-        current_dyld_path = os.environ.get('DYLD_LIBRARY_PATH', '')
-        os.environ['DYLD_LIBRARY_PATH'] = f"{av_dylib_dir}:{current_dyld_path}"
-        print(f"✅ AV libraries available at: {av_dylib_dir}")
-    else:
-        print("⚠️  Warning: AV libraries not found in app bundle")
-    
-    # Try to prevent MLX nanobind conflicts with environment variables
-    # Set these before any MLX imports happen
-    os.environ['MLX_DISABLE_METAL_CACHE'] = '0'
-    os.environ['MLX_MEMORY_POOL'] = '1'
-    
-    # Ensure clean MLX module loading
-    mlx_modules = [k for k in sys.modules.keys() if k.startswith('mlx')]
-    for mod in mlx_modules:
-        if mod in sys.modules:
-            del sys.modules[mod]
-EOF
+print("--- Running MLX-GUI Runtime Fixes ---")
 
-# Find MLX path for data files
-# Using Python audio libraries only (av, librosa, soundfile)
-# This avoids FFmpeg binary conflicts with Python av package
-echo "📦 Using Python-only audio libraries (parakeet_mlx, av, librosa, soundfile)"
-echo "   This avoids system FFmpeg vs Python av library conflicts"
+# -- Fix for ffmpeg/av --
+try:
+    if getattr(sys, 'frozen', False):
+        bundle_dir = sys._MEIPASS
 
-# Check if we have a custom icon
-ICON_PARAM=""
-if [ -f "app_icon.icns" ]; then
-    ICON_PARAM="--icon=app_icon.icns"
-    echo "📱 Using custom app icon"
-else
-    echo "📱 Using default icon"
-fi
+        # Fix for ffmpeg
+        ffmpeg_path = os.path.join(bundle_dir, 'ffmpeg')
+        if os.path.exists(ffmpeg_path):
+            os.environ['PATH'] = f"{os.path.dirname(ffmpeg_path)}{os.pathsep}{os.environ.get('PATH', '')}"
+            # print("✅ FFmpeg binary path configured.")
+        else:
+            # Fallback for older ffmpeg-binaries structure
+            ffmpeg_dir = os.path.join(bundle_dir, 'ffmpeg-binaries', 'bin')
+            if os.path.exists(ffmpeg_dir):
+                os.environ['PATH'] = f"{ffmpeg_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+                # print("✅ FFmpeg binary (fallback) path configured.")
+            else:
+                import ffmpeg
+                print("⚠️ FFmpeg binary path not found in bundle.")
+
+
+        # Fix for av
+        av_dir = os.path.join(bundle_dir, 'av')
+        if os.path.exists(av_dir):
+            os.environ['AV_ROOT'] = av_dir
+            # print("✅ PyAV (av) libraries configured.")
+        else:
+            print("⚠️ PyAV (av) libraries not found in bundle.")
+
+except Exception as e:
+    print(f"⚠️ Error in ffmpeg/av fix: {e}")
+
+
+# -- Basic transformers sanity check --
+try:
+    import transformers  # noqa: F401
+    # If we reach here, transformers is importable with its metadata.
+except Exception as e:
+    print(f"⚠️ Transformers import sanity check failed: {e}")
+
+# -- Fix for cv2/OpenCV --
+# This is more of a check to ensure transformers can find cv2
+try:
+    import cv2
+    print("✅ Minimal cv2 available for feature detection.")
+except ImportError:
+    print("⚠️ cv2 (OpenCV) not found, which may affect some vision models.")
+except Exception as e:
+    print(f"⚠️ An unexpected error occurred during cv2 check: {e}")
+
+# -- Patch for missing Gemma3N VLM bias parameter --
+try:
+    import mlx_vlm.utils as vlm_utils
+    if not hasattr(vlm_utils, '__bias_patch_applied'):
+        orig_sanitize = vlm_utils.sanitize_weights
+        def patched_sanitize(model_obj, weights, config=None):
+            weights = orig_sanitize(model_obj, weights, config)
+            bias_key = 'vision_tower.timm_model.conv_stem.conv.bias'
+            weight_key = 'vision_tower.timm_model.conv_stem.conv.weight'
+            if bias_key not in weights and weight_key in weights:
+                try:
+                    import mlx.core as mx
+                    w = weights[weight_key]
+                    weights[bias_key] = mx.zeros((w.shape[0],), dtype=w.dtype)
+                    print('✅ Patched missing VLM conv_stem bias')
+                except Exception as e:
+                    print(f'⚠️ Failed to patch VLM bias: {e}')
+            return weights
+        vlm_utils.sanitize_weights = patched_sanitize
+        vlm_utils.__bias_patch_applied = True
+except Exception as e:
+    print(f'⚠️ Unable to apply VLM bias patch: {e}')
+
+print("--- Runtime Fixes Completed ---")
+
+EOL
+
+# Base PyInstaller command
+PYINSTALLER_CMD=(
+    "pyinstaller"
+    "src/mlx_gui/app_main.py"
+    "--name" "MLX-GUI"
+    "--windowed"
+    "--noconfirm"
+    "--clean"
+    "--onedir" # Use onedir for macOS .app bundles
+    "--additional-hooks-dir" "hooks"
+    "--runtime-hook" "$ALL_FIXES_HOOK"
+    "--icon" "app_icon.icns"
+    "--osx-bundle-identifier" "org.matthewrogers.mlx-gui"
+    "--copy-metadata" "tqdm"
+    "--copy-metadata" "regex"
+    "--copy-metadata" "safetensors"
+    "--copy-metadata" "filelock"
+    "--copy-metadata" "numpy"
+    "--copy-metadata" "requests"
+    "--copy-metadata" "packaging"
+    "--copy-metadata" "pyyaml"
+    "--copy-metadata" "tokenizers"
+    "--copy-metadata" "huggingface-hub"
+    "--copy-metadata" "transformers"
+    "--copy-metadata" "timm"
+    "--copy-metadata" "torch"
+    "--copy-metadata" "torchvision"
+    "--copy-metadata" "sentencepiece"
+    "--copy-metadata" "Pillow"
+    "--copy-metadata" "av"
+    "--copy-metadata" "parakeet-mlx"
+    "--copy-metadata" "mlx-vlm"
+    "--copy-metadata" "mlx-lm"
+    "--copy-metadata" "Jinja2"
+    "--copy-metadata" "opencv-python-headless"
+    # Include HTML templates and media assets
+    "--add-data" "src/mlx_gui/templates:mlx_gui/templates"
+    "--add-data" "media:media"
+    "--hidden-import" "scipy.sparse.csgraph._validation"
+    "--hidden-import" "mlx._reprlib_fix"
+    "--hidden-import" "Jinja2"
+    "--exclude-module" "tkinter"
+    "--exclude-module" "PySide6"
+    "--exclude-module" "PyQt6"
+    "--exclude-module" "wx"
+)
 
 # Read version from Python module
 VERSION=$(python3 -c "from src.mlx_gui import __version__; print(__version__)")
 echo "📝 Building version: $VERSION"
 
-pyinstaller src/mlx_gui/app_main.py \
-    --name="MLX-GUI" \
-    --onedir \
-    --windowed \
-    --noconfirm \
-    --clean \
-    --additional-hooks-dir=hooks \
-    --runtime-hook=rthooks/pyi_rth_ffmpeg_binaries.py \
-    $ICON_PARAM \
-    --exclude-module=cv2 \
-    --exclude-module=opencv-python \
-    --exclude-module=opencv-contrib-python \
-    --exclude-module=torch.distributed \
-    --exclude-module=torch.optim \
-    --exclude-module=matplotlib \
-    --hidden-import=scipy.sparse.csgraph._validation \
-    --exclude-module=torch \
-    --exclude-module=torchvision \
-    --exclude-module=torchaudio \
-    --exclude-module=tensorflow \
-    --exclude-module=jax \
-    --exclude-module=sklearn \
-    --exclude-module=pandas \
-    --exclude-module=IPython \
-    --exclude-module=jupyter \
-    --exclude-module=notebook \
-    --exclude-module=bokeh \
-    --exclude-module=plotly \
-    --exclude-module=seaborn \
-    --exclude-module=sympy \
-    --hidden-import=mlx \
-    --hidden-import=mlx_lm \
-    --hidden-import=mlx.core \
-    --hidden-import=mlx.nn \
-    --hidden-import=mlx.optimizers \
-    --hidden-import=mlx._reprlib_fix \
-    --hidden-import=mlx.utils \
-    --hidden-import=mlx_whisper \
-    --hidden-import=mlx_whisper.transcribe \
-    --hidden-import=mlx_vlm \
-    --hidden-import=mlx_vlm.generate \
-    --hidden-import=mlx_vlm.load \
-    --hidden-import=mlx_vlm.utils \
-    --hidden-import=mlx_vlm.prompt_utils \
-    --hidden-import=parakeet_mlx \
-    --hidden-import=dacite \
-    --hidden-import=librosa \
-    --hidden-import=typer \
-    --hidden-import=audiofile \
-    --hidden-import=audiofile.core \
-    --hidden-import=audresample \
-    --hidden-import=audmath \
-    --hidden-import=audeer \
-    --hidden-import=soundfile \
-    --hidden-import=soxr \
-    --hidden-import=numba \
-    --hidden-import=llvmlite \
-    --hidden-import=av \
-    --hidden-import=av.codec \
-    --hidden-import=av.container \
-    --hidden-import=av.format \
-    --hidden-import=av.stream \
-    --hidden-import=ffmpeg \
-    --hidden-import=transformers \
-    --hidden-import=tokenizers \
-    --hidden-import=safetensors \
-    --hidden-import=huggingface_hub \
-    --hidden-import=fastapi \
-    --hidden-import=uvicorn \
-    --hidden-import=rumps \
-    --hidden-import=objc \
-    --hidden-import=AppKit \
-    --hidden-import=Foundation \
-    --hidden-import=CoreFoundation \
-    --hidden-import=psutil \
-    --hidden-import=sqlalchemy \
-    --hidden-import=pydantic \
-    --hidden-import=httpx \
-    --hidden-import=requests \
-    --hidden-import=typer \
-    --hidden-import=rich \
-    --hidden-import=PIL \
-    --hidden-import=numpy \
-    --hidden-import=sentencepiece \
-    --hidden-import=protobuf \
-    --hidden-import=regex \
-    --hidden-import=yaml \
-    --hidden-import=tqdm \
-    --hidden-import=click \
-    --hidden-import=aiofiles \
-    --hidden-import=appdirs \
-    --hidden-import=markdown_it_py \
-    --hidden-import=jinja2 \
-    --hidden-import=starlette \
-    --hidden-import=uvloop \
-    --hidden-import=websockets \
-    --hidden-import=watchfiles \
-    --hidden-import=python_multipart \
-    --hidden-import=python_dotenv \
-    --add-data="src/mlx_gui/templates:mlx_gui/templates" \
-    --collect-all=mlx \
-    --collect-all=mlx_lm \
-    --collect-all=mlx_whisper \
-    --collect-all=mlx_vlm \
-    --collect-all=parakeet_mlx \
-    --collect-all=librosa \
-    --collect-all=dacite \
-    --collect-all=typer \
-    --collect-all=audiofile \
-    --collect-all=audresample \
-    --collect-all=audmath \
-    --collect-all=audeer \
-    --collect-all=soundfile \
-    --collect-all=soxr \
-    --collect-all=numba \
-    --collect-all=llvmlite \
-    --collect-all=av \
-    --collect-all=ffmpeg \
-    --collect-all=transformers \
-    --collect-all=tokenizers \
-    --collect-all=safetensors \
-    --collect-all=scipy.sparse.csgraph \
-    --collect-all=huggingface_hub \
-    --collect-all=rumps \
-    --collect-all=objc \
-    --target-arch=arm64 \
-    --osx-bundle-identifier="org.matthewrogers.mlx-gui" \
-    --log-level=INFO
+# Run PyInstaller with all the options
+echo "🔨 Building app bundle with PyInstaller..."
+# shellcheck disable=SC2086
+"${PYINSTALLER_CMD[@]}"
 
 # Clean up temporary hook files
 echo "🧹 Cleaning up temporary hook files..."
-rm -rf hooks/ rthooks/
+rm -rf "$HOOKS_DIR"
 
 # Check if build was successful
 if [ -d "dist/MLX-GUI.app" ]; then
     echo "✅ App bundle built successfully!"
     echo "📍 Location: dist/MLX-GUI.app"
-    
+
     # Fix the Info.plist to make it a menu bar app (no dock icon) - BEFORE signing
     echo "🔧 Converting to menu bar app (removing dock icon)..."
     INFO_PLIST="dist/MLX-GUI.app/Contents/Info.plist"
@@ -464,14 +460,14 @@ if [ -d "dist/MLX-GUI.app" ]; then
         # Add LSUIElement=true to make it a menu bar app
         /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$INFO_PLIST" 2>/dev/null || \
         /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$INFO_PLIST"
-        
+
         # Add version information to Info.plist
         /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" "$INFO_PLIST" 2>/dev/null || \
         /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$INFO_PLIST"
-        
+
         /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $VERSION" "$INFO_PLIST" 2>/dev/null || \
         /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$INFO_PLIST"
-        
+
         echo "✅ App converted to menu bar app (no dock icon)"
         echo "   - App will only appear in the menu bar"
         echo "   - No dock icon will be shown"
@@ -479,26 +475,26 @@ if [ -d "dist/MLX-GUI.app" ]; then
     else
         echo "⚠️  Warning: Could not find Info.plist at $INFO_PLIST"
     fi
-    
+
     # Code signing section
     echo ""
     echo "🔐 Code Signing..."
-    
+
     # Check if we have a Developer ID Application certificate
     CERT_NAME=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')
-    
+
     if [ -n "$CERT_NAME" ]; then
         echo "📝 Found certificate: $CERT_NAME"
         echo "🔏 Signing app bundle..."
-        
+
         # Sign all executables and libraries first (deep signing)
         codesign --force --deep --sign "$CERT_NAME" --options runtime --entitlements entitlements.plist "dist/MLX-GUI.app"
-        
+
         # Verify the signature
         if codesign --verify --verbose "dist/MLX-GUI.app" 2>/dev/null; then
             echo "✅ App successfully signed!"
             echo "🛡️  This will eliminate macOS security warnings"
-            
+
             # Show signature info
             echo ""
             echo "📜 Signature Info:"
@@ -516,7 +512,7 @@ if [ -d "dist/MLX-GUI.app" ]; then
         echo "   3. Install it in Keychain Access"
         echo "   4. Re-run this build script"
     fi
-    
+
     echo ""
     echo "🎉 You can now:"
     echo "   1. Run: open dist/MLX-GUI.app"
@@ -548,4 +544,4 @@ echo "🔗 Next steps:"
 echo "   • Test the app: open dist/MLX-GUI.app"
 echo "   • Create DMG installer for easy distribution"
 echo "   • App is ready for sharing with anyone - no setup required!"
-echo "   • Audio & Vision support included: Whisper, Parakeet, and MLX-VLM models work out of the box" 
+echo "   • Audio & Vision support included: Whisper, Parakeet, and MLX-VLM models work out of the box (filtered OpenCV - no SSL conflicts)"

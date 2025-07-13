@@ -250,4 +250,6 @@ generation_config.json
 # Keep MLX-GUI assets
 !src/mlx_gui/assets/
 !src/mlx_gui/assets/*.png
-!src/mlx_gui/assets/*.ico 
+!src/mlx_gui/assets/*.ico
+hooks/
+rthooks/

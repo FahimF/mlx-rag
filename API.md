@@ -47,7 +47,7 @@ Root endpoint with basic server information.
 ```json
 {
   "name": "MLX-GUI API",
-  "version": "1.1.0",
+      "version": "1.2.0",
   "status": "running"
 }
 ```
@@ -122,6 +122,41 @@ Restart the server with updated settings.
 
 ---
 
+## Memory Management
+
+MLX-GUI features advanced memory management with automatic model unloading:
+
+### Three-Layer Memory Protection
+
+1. **Proactive Management**
+   - Automatic inactivity-based unloading (configurable timeout, default: 5 minutes)
+   - Background cleanup worker (60-second intervals)
+
+2. **Concurrent Limit Management**
+   - Hard limit of concurrent models (default: 3, configurable)
+   - LRU (Least Recently Used) eviction when limit reached
+
+3. **Emergency Memory Recovery**
+   - Automatic MLX memory error detection
+   - Up to 3 retry attempts with model unloading between attempts
+   - Memory cleanup and cache clearing
+
+### Memory Error Detection
+
+The system automatically detects memory-related errors:
+- Error messages: "out of memory", "memory allocation", "insufficient memory", "metal out of memory"
+- Error types: `OutOfMemoryError`, `MemoryError`, `RuntimeError` with memory keywords
+- Automatic retry with LRU model unloading
+
+### Auto-Unload Behavior
+
+When memory constraints are reached:
+1. **Concurrent Limit**: Automatically unloads oldest model when trying to load beyond the limit
+2. **Memory Errors**: Detects MLX memory failures and retries with automatic cleanup
+3. **Inactivity**: Unloads models after configurable timeout period
+
+---
+
 ## Model Management
 
 ### List Models
@@ -174,7 +209,7 @@ Get detailed information about a specific model.
 ### Load Model
 
 #### `POST /v1/models/{model_name}/load`
-Load a model into memory.
+Load a model into memory. If concurrent model limits are reached, the oldest model will be automatically unloaded to make space.
 
 **Parameters:**
 - `priority` (query, optional): Loading priority (default: 0)
@@ -187,10 +222,15 @@ Load a model into memory.
 }
 ```
 
+**Memory Management:**
+- Automatically unloads LRU model if concurrent limit (default: 3) is reached
+- Retries up to 3 times with memory cleanup if MLX memory errors occur
+- Memory warnings are logged but don't prevent loading
+
 **Error Responses:**
-- `400`: Model not compatible with system
+- `400`: Model not compatible with system or hardware requirements not met
 - `404`: Model not found
-- `500`: Loading failed
+- `500`: Loading failed after all retry attempts
 
 ### Unload Model
 
@@ -381,6 +421,39 @@ Get categorized model lists.
 }
 ```
 
+### Embedding Models
+
+#### `GET /v1/discover/embeddings`
+Discover MLX-compatible embedding models from HuggingFace.
+
+**Parameters:**
+- `query` (optional): Search query for embedding models
+- `limit` (optional): Number of results (default: 20)
+
+**Response:**
+```json
+{
+  "models": [
+    {
+      "id": "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
+      "name": "Qwen3-Embedding-0.6B-4bit-DWQ",
+      "author": "mlx-community",
+      "downloads": 1543,
+      "likes": 12,
+      "model_type": "feature-extraction",
+      "size_gb": 0.8,
+      "estimated_memory_gb": 1.2,
+      "mlx_compatible": true,
+      "has_mlx_version": true,
+      "tags": ["mlx", "embedding", "feature-extraction"],
+      "description": "Qwen3 embedding model quantized to 4-bit for MLX",
+      "updated_at": "2025-01-01T12:00:00"
+    }
+  ],
+  "total": 1
+}
+```
+
 ### Compatible Models
 
 #### `GET /v1/discover/compatible`
@@ -425,6 +498,33 @@ Get detailed information about a HuggingFace model.
 ---
 
 ## Model Manager
+
+### List Models (Internal Format)
+
+#### `GET /v1/manager/models`
+List all models with detailed status information (internal format with status field).
+
+**Response:**
+```json
+{
+  "models": [
+    {
+      "id": 1,
+      "name": "llama-3.2-3b-instruct",
+      "type": "text",
+      "status": "loaded",
+      "memory_required_gb": 8,
+      "use_count": 15,
+      "last_used_at": "2025-01-04T10:30:00",
+      "created_at": "2025-01-04T09:00:00",
+      "huggingface_id": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+      "author": "mlx-community"
+    }
+  ]
+}
+```
+
+**Note:** This endpoint includes the `status` field, unlike the OpenAI-compatible `/v1/models` endpoint.
 
 ### Manager Status
 
@@ -683,7 +783,7 @@ pip install mlx-gui[audio]
 - **WAV** (recommended)
 - **MP3**
 - **M4A**
-- **FLAC** 
+- **FLAC**
 - **OGG**
 - **WEBM**
 
@@ -757,7 +857,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
     "model": "gemma-3n-e4b-it",
     "messages": [
       {
-        "role": "user", 
+        "role": "user",
         "content": [
           {
             "type": "text",
@@ -786,7 +886,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
         "role": "user",
         "content": [
           {
-            "type": "text", 
+            "type": "text",
             "text": "Compare these two images and tell me the differences."
           },
           {
@@ -794,7 +894,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
             "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQ..."}
           },
           {
-            "type": "image_url", 
+            "type": "image_url",
             "image_url": {"url": "data:image/png;base64,iVBORw0KGgo..."}
           }
         ]
@@ -1057,7 +1157,7 @@ curl -X POST http://localhost:8000/v1/embeddings \
       "index": 0
     },
     {
-      "object": "embedding", 
+      "object": "embedding",
       "embedding": [0.2345, -0.6789, 0.8901, ...],
       "index": 1
     }
