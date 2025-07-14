@@ -25,7 +25,7 @@
 
 ## 📦 Latest Release
 
-### v1.2.0 - Advanced Memory Management & VLM Stability (January 2025)
+### v1.2.0 - Advanced Memory Management & VLM Stability (July 13 2025)
 
 🧠 **Revolutionary Memory Management**
 - ✅ **Intelligent Auto-Unload System** - Automatically unloads oldest models when memory limits are reached
