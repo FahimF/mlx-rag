@@ -31,7 +31,7 @@
 - ✅ **Intelligent Auto-Unload System** - Automatically unloads oldest models when memory limits are reached
 - 🔄 **Three-Layer Memory Protection** - Proactive cleanup, concurrent limits, and emergency memory recovery
 - ⚡ **Memory Error Detection** - Detects MLX memory errors and retries with automatic model unloading
-- 📊 **Smart LRU Eviction** - Least Recently Used models are automatically freed to make room for new ones
+- 📊 **Smart LRU Eviction** - Least Recently Used models are automatically freed to make room for new ones, this is 🪟TRANSPARENT to the users.
 - 🛡️ **Memory Overload Recovery** - Up to 3 retry attempts with intelligent memory cleanup between attempts
 - ⚡️ **Core Updates** - Updated to MLX-LM 0.26.0 and MLX-VLM 0.3.1
 
