@@ -24,6 +24,24 @@ def setup_app_environment():
         # No need to manually add Resources to sys.path; PyInstaller handles it.
         # Removing this avoids duplicate module imports that caused nanobind errors.
 
+        # Add FFmpeg binaries to PATH for audio transcription
+        frameworks_path = app_bundle_path / "Frameworks"
+        ffmpeg_paths = []
+        
+        # Look for FFmpeg binaries in the app bundle
+        for ffmpeg_dir in ["ffmpeg", "ffprobe"]:
+            ffmpeg_path = frameworks_path / ffmpeg_dir
+            if ffmpeg_path.exists():
+                ffmpeg_paths.append(str(ffmpeg_path))
+        
+        if ffmpeg_paths:
+            current_path = os.environ.get('PATH', '')
+            new_path = ':'.join(ffmpeg_paths + [current_path]) if current_path else ':'.join(ffmpeg_paths)
+            os.environ['PATH'] = new_path
+            print(f"✅ Added FFmpeg to PATH: {ffmpeg_paths}")
+        else:
+            print("⚠️  FFmpeg binaries not found in app bundle - audio transcription may not work")
+
         # Set up logging to file in user's home directory
         log_dir = Path.home() / "Library" / "Logs" / "MLX-GUI"
         log_dir.mkdir(parents=True, exist_ok=True)

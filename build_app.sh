@@ -43,16 +43,33 @@ fi
 
 echo "✅ All critical dependencies found"
 
+# Show key MLX library versions for troubleshooting
+echo "📋 Key MLX library versions:"
+pip show mlx-lm mlx-vlm | grep -E "^(Name|Version):"
+
 # Ensure latest audio and vision dependencies
 echo "📦 Ensuring latest audio and vision dependencies..."
 pip install parakeet-mlx -U
 pip install av -U
 pip install ffmpeg-binaries -U
+
+# Initialize ffmpeg binaries to ensure they're downloaded
+echo "📦 Downloading FFmpeg binaries..."
+python3 -c "
+import ffmpeg
+try:
+    ffmpeg.init()
+    print('✅ FFmpeg binaries downloaded successfully')
+except Exception as e:
+    print(f'⚠️ FFmpeg init failed: {e}')
+    print('FFmpeg will be downloaded at runtime')
+"
 pip install mlx-vlm -U
 pip install mlx-lm -U
 pip install timm -U
 pip install torchvision -U
 # Replace full OpenCV with headless build to avoid crypto conflicts
+pip uninstall opencv-python -y 2>/dev/null || true
 pip install opencv-python-headless -U
 
 # Clean previous builds
@@ -144,7 +161,42 @@ hiddenimports += [
 ]
 EOF
 
-# Note: Removed ffmpeg-python hook as we're using Python av package instead
+# Copy FFmpeg binary directly from venv instead of using hook
+FFMPEG_BINARY="$PWD/.venv/lib/python3.11/site-packages/ffmpeg/binaries/ffmpeg"
+FFPROBE_BINARY="$PWD/.venv/lib/python3.11/site-packages/ffmpeg/binaries/ffprobe"
+
+if [ -f "$FFMPEG_BINARY" ]; then
+    echo "✅ Found FFmpeg binary at: $FFMPEG_BINARY"
+    echo "✅ Found FFprobe binary at: $FFPROBE_BINARY"
+    
+    # Copy to project directory for PyInstaller to pick up
+    mkdir -p ./ffmpeg_binaries
+    cp "$FFMPEG_BINARY" ./ffmpeg_binaries/ffmpeg
+    cp "$FFPROBE_BINARY" ./ffmpeg_binaries/ffprobe
+    chmod +x ./ffmpeg_binaries/*
+    
+    echo "📦 Copied FFmpeg binaries to ./ffmpeg_binaries/"
+else
+    echo "❌ FFmpeg binary not found at: $FFMPEG_BINARY"
+    echo "⚠️ Audio transcription will not work"
+fi
+
+# Create minimal hook for ffmpeg package data only (no binaries)
+cat > hooks/hook-ffmpeg.py << 'EOF'
+from PyInstaller.utils.hooks import collect_all
+import os
+
+# Collect only the Python module data (not binaries)
+datas, _, hiddenimports = collect_all('ffmpeg')
+
+# Remove binary files from datas to avoid conflicts
+datas = [(src, dst) for src, dst in datas if not src.endswith(('ffmpeg', 'ffprobe'))]
+
+# Empty binaries list since we handle them separately
+binaries = []
+
+print(f"✅ FFmpeg hook: Collected {len(datas)} data files (binaries handled separately)")
+EOF
 
 # Create custom hook for av (PyAV)
 cat > hooks/hook-av.py << 'EOF'
@@ -189,6 +241,33 @@ hiddenimports += [
 ]
 EOF
 
+# Create custom hook for MLX-LM to include all model architectures
+cat > hooks/hook-mlx_lm.py << 'EOF'
+from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+# Collect all MLX-LM data files and submodules  
+datas, binaries, hiddenimports = collect_all('mlx_lm')
+
+# Ensure ALL model submodules are included (this is critical!)
+hiddenimports.extend(collect_submodules('mlx_lm'))
+
+# Explicitly include model files that PyInstaller might miss
+hiddenimports.extend([
+    'mlx_lm.models.qwen3',
+    'mlx_lm.models.qwen2', 
+    'mlx_lm.models.qwen',
+    'mlx_lm.models.gemma3_text',
+    'mlx_lm.models.gemma',
+    'mlx_lm.models.llama',
+    'mlx_lm.models.mistral',
+    'mlx_lm.models.cache',
+    'mlx_lm.models.switch_layers',
+    'mlx_lm.models.rope_utils',
+])
+
+print("✅ MLX-LM hook: All model architectures and submodules collected")
+EOF
+
 # Create custom hook for transformers to ensure all processor modules are included
 cat > hooks/hook-transformers.py << 'EOF'
 from PyInstaller.utils.hooks import collect_all, collect_submodules
@@ -205,47 +284,121 @@ hiddenimports.extend(collect_submodules('transformers'))
 print("✅ Aggressive transformers hook: All submodules collected.")
 EOF
 
-# Create cv2 hook that filters out SSL/crypto libraries that conflict with Python
+# Replace cv2 hook with expert-level SSL conflict resolution
 cat > hooks/hook-cv2.py << 'EOF'
-from PyInstaller.utils.hooks import collect_all
+"""
+Expert OpenCV hook that aggressively removes ALL OpenSSL/crypto libraries
+to prevent conflicts with Python's built-in _ssl module.
+Based on official PyInstaller hooks documentation.
+"""
 
-# Collect cv2 but filter out problematic crypto libraries
+from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs
+from PyInstaller.compat import is_darwin, is_win
+import os
+
+# Collect everything from cv2 first
 datas, binaries, hiddenimports = collect_all('cv2')
 
-# Filter out specific SSL/crypto libraries that conflict with Python's SSL
-problematic_libs = [
-    'libcrypto.3.dylib',
-    'libssl.3.dylib',
-    'libmbedcrypto.3.5.1.dylib',
-    'libcrypto',
-    'libssl',
-    'crypto.3',
-    'ssl.3'
+# Comprehensive list of SSL/crypto library patterns that MUST be excluded
+SSL_CONFLICT_PATTERNS = [
+    # Generic SSL patterns
+    'ssl', 'crypto', 'openssl',
+    # Version-specific patterns  
+    'libssl.1.1', 'libcrypto.1.1',
+    'libssl.3', 'libcrypto.3',
+    'libssl.1.0', 'libcrypto.1.0',
+    # Platform-specific patterns
+    'ssleay32', 'libeay32',  # Windows
+    'libssl.dylib', 'libcrypto.dylib',  # macOS generic
+    'libssl.so', 'libcrypto.so',  # Linux
 ]
 
-filtered_binaries = []
-for src, dest in binaries:
-    # Check if this binary contains any problematic libraries
-    skip = False
-    for lib in problematic_libs:
-        if lib in src:
-            print(f"🔧 Filtering out problematic crypto library: {src}")
-            skip = True
-            break
+def is_ssl_library(file_path: str) -> bool:
+    """
+    Determine if a file is an SSL/crypto library that could conflict.
+    Uses comprehensive pattern matching.
+    """
+    if not file_path:
+        return False
+    
+    basename = os.path.basename(file_path).lower()
+    
+    # Check against all known SSL patterns
+    for pattern in SSL_CONFLICT_PATTERNS:
+        if pattern in basename:
+            return True
+    
+    return False
 
-    if not skip:
-        filtered_binaries.append((src, dest))
+def filter_ssl_conflicts(file_list):
+    """
+    Filter out SSL libraries from a list of (src, dest) tuples.
+    """
+    filtered = []
+    excluded_count = 0
+    
+    for src, dest in file_list:
+        if is_ssl_library(src):
+            print(f"   🚫 Excluding SSL conflict: {os.path.basename(src)}")
+            excluded_count += 1
+        else:
+            filtered.append((src, dest))
+    
+    if excluded_count > 0:
+        print(f"   ✅ Excluded {excluded_count} SSL libraries from OpenCV")
+    
+    return filtered
 
-binaries = filtered_binaries
+# Apply aggressive SSL filtering to binaries
+print("🔍 OpenCV Hook: Filtering SSL conflicts from binaries...")
+original_binary_count = len(binaries)
+binaries = filter_ssl_conflicts(binaries)
 
-# Essential cv2 imports for transformers and basic vision functionality
+# Apply same filtering to datas (OpenCV sometimes puts dylibs here)
+print("🔍 OpenCV Hook: Filtering SSL conflicts from datas...")
+original_data_count = len(datas)
+datas = filter_ssl_conflicts(datas)
+
+# Platform-specific additional cleanup
+if is_darwin:
+    # On macOS, be extra aggressive about crypto libs
+    def is_macos_crypto(path):
+        basename = os.path.basename(path).lower()
+        return any(x in basename for x in ['.dylib']) and any(x in basename for x in ['crypto', 'ssl'])
+    
+    binaries = [(src, dest) for src, dest in binaries if not is_macos_crypto(src)]
+    datas = [(src, dest) for src, dest in datas if not is_macos_crypto(src)]
+
+elif is_win:
+    # On Windows, exclude SSL DLLs
+    def is_windows_ssl(path):
+        basename = os.path.basename(path).lower()
+        return basename.endswith('.dll') and any(x in basename for x in ['ssl', 'crypto'])
+    
+    binaries = [(src, dest) for src, dest in binaries if not is_windows_ssl(src)]
+
+# Essential hidden imports for OpenCV
 hiddenimports += [
-    'cv2',
-    'cv2.cv2',
+    'cv2', 
+    'cv2.cv2', 
     'numpy',
+    # Core OpenCV modules that might be dynamically imported
+    'cv2.typing',
+    'cv2.dnn',
+    'cv2.imgproc',
+    'cv2.imgcodecs',
+    'cv2.videoio',
+    'cv2.highgui'
 ]
 
-print(f"✅ OpenCV hook: filtered {len(binaries) - len(filtered_binaries)} problematic libraries")
+# Final validation
+final_binary_count = len(binaries)
+final_data_count = len(datas)
+
+print(f"✅ OpenCV SSL Conflict Resolution Complete:")
+print(f"   📦 Binaries: {original_binary_count} → {final_binary_count}")
+print(f"   📄 Datas: {original_data_count} → {final_data_count}")
+print(f"   🛡️  All SSL/crypto libraries removed to prevent _ssl conflicts")
 EOF
 
 # Create custom hook for mlx-vlm
@@ -343,12 +496,170 @@ except Exception as e:
     print(f"⚠️ Error in ffmpeg/av fix: {e}")
 
 
-# -- Basic transformers sanity check --
+# -- PyTorch/Triton conflict fix --
 try:
-    import transformers  # noqa: F401
-    # If we reach here, transformers is importable with its metadata.
+    if getattr(sys, 'frozen', False):
+        # Prevent PyTorch from registering conflicting TORCH_LIBRARY namespaces
+        import os
+        os.environ['TORCH_SHOW_CPP_STACKTRACES'] = '0'
+        os.environ['PYTORCH_DISABLE_CUDNN_V8_API'] = '1'
+        
+        # Mock problematic PyTorch modules to prevent double registration
+        import sys
+        from types import ModuleType
+        
+        # Create mock modules for problematic torch components
+        mock_triton = ModuleType('triton')
+        mock_triton.__path__ = []
+        mock_triton.__spec__ = type('MockSpec', (), {
+            'name': 'triton',
+            'origin': None,
+            'submodule_search_locations': []
+        })()
+        mock_triton.__version__ = '2.0.0'
+        sys.modules['triton'] = mock_triton
+        
+        # Prevent torchvision.ops from causing conflicts
+        try:
+            import torchvision
+            if hasattr(torchvision, 'ops'):
+                # Replace ops with a minimal version
+                class MockOps:
+                    pass
+                torchvision.ops = MockOps()
+        except ImportError:
+            pass
+        
+        print("✅ PyTorch/Triton conflict prevention applied")
+        
 except Exception as e:
-    print(f"⚠️ Transformers import sanity check failed: {e}")
+    print(f"⚠️ Error applying PyTorch/Triton fix: {e}")
+
+# -- Comprehensive transformers metadata fix --
+try:
+    if getattr(sys, 'frozen', False):
+        # Patch importlib.metadata before any imports that might need it
+        import importlib.metadata
+        import importlib.util
+        from types import SimpleNamespace
+        
+        class FakeDistribution:
+            def __init__(self, name, version, requires=None):
+                self.metadata = {
+                    'Name': name, 
+                    'Version': version,
+                    'Requires-Dist': requires or []
+                }
+                self.version = version
+                self.name = name
+                self._requires = requires or []
+            
+            def read_text(self, filename):
+                if filename == 'METADATA':
+                    lines = [f"Name: {self.name}", f"Version: {self.version}"]
+                    if self._requires:
+                        lines.extend([f"Requires-Dist: {req}" for req in self._requires])
+                    return "\\n".join(lines) + "\\n"
+                return ""
+            
+            @property 
+            def requires(self):
+                return self._requires
+            
+            @property
+            def entry_points(self):
+                return []
+            
+            @property
+            def files(self):
+                return []
+        
+        # Comprehensive fake package registry with proper version constraints
+        fake_packages = {
+            'tqdm': ('4.67.1', ['colorama ; platform_system == "Windows"']),
+            'transformers': ('4.53.1', [
+                'filelock', 'huggingface-hub>=0.23.2,<1.0', 'numpy>=1.17', 
+                'packaging>=20.0', 'pyyaml>=5.1', 'regex!=2019.12.17', 
+                'requests', 'safetensors>=0.4.1', 'tokenizers<0.21,>=0.20'
+            ]),
+            'tokenizers': ('0.21.2', []),
+            'huggingface-hub': ('0.33.2', [
+                'filelock', 'fsspec>=2023.5.0', 'packaging>=20.9', 
+                'pyyaml>=5.1', 'requests', 'tqdm>=4.42.1', 'typing-extensions>=3.7.4.3'
+            ]),
+            'safetensors': ('0.5.3', []),
+            'regex': ('2024.11.6', []),
+            'requests': ('2.32.4', ['certifi>=2017.4.17', 'charset-normalizer<4,>=2', 'idna<4,>=2.5', 'urllib3<3,>=1.21.1']),
+            'filelock': ('3.18.0', []),
+            'pyyaml': ('6.0.2', []),
+            'numpy': ('2.2.6', []),
+            'packaging': ('25.0', []),
+            'certifi': ('2024.12.14', []),
+            'charset-normalizer': ('3.4.0', []),
+            'idna': ('3.10', []),
+            'urllib3': ('2.3.0', []),
+            'typing-extensions': ('4.12.2', []),
+            'fsspec': ('2024.12.0', []),
+            'jinja2': ('3.1.2', ['MarkupSafe>=2.0']),
+            'Jinja2': ('3.1.2', ['MarkupSafe>=2.0']),
+            'MarkupSafe': ('2.1.3', [])
+        }
+        
+        # Store originals
+        original_distribution = importlib.metadata.distribution
+        original_distributions = importlib.metadata.distributions
+        
+        def patched_distribution(name):
+            try:
+                return original_distribution(name)
+            except importlib.metadata.PackageNotFoundError:
+                if name in fake_packages:
+                    version, requires = fake_packages[name]
+                    print(f"🔧 Creating fake metadata for {name} v{version}")
+                    return FakeDistribution(name, version, requires)
+                # Try alternative name formats
+                alt_name = name.replace('-', '_').replace('_', '-')
+                if alt_name in fake_packages:
+                    version, requires = fake_packages[alt_name]
+                    print(f"🔧 Creating fake metadata for {name} (alt: {alt_name}) v{version}")
+                    return FakeDistribution(name, version, requires)
+                raise
+        
+        def patched_distributions():
+            """Return all available distributions including fake ones"""
+            try:
+                real_dists = list(original_distributions())
+            except:
+                real_dists = []
+            
+            # Add fake distributions
+            for name, (version, requires) in fake_packages.items():
+                try:
+                    # Only add if not already present
+                    original_distribution(name)
+                except importlib.metadata.PackageNotFoundError:
+                    real_dists.append(FakeDistribution(name, version, requires))
+            
+            return real_dists
+        
+        # Apply patches
+        importlib.metadata.distribution = patched_distribution
+        importlib.metadata.distributions = patched_distributions
+        
+        print("✅ Comprehensive transformers metadata patching applied")
+        
+        # Test import
+        import transformers
+        print("✅ Transformers imported successfully with metadata patches")
+        
+except Exception as e:
+    print(f"⚠️ Error applying transformers metadata fix: {e}")
+    # Try basic import anyway
+    try:
+        import transformers
+        print("✅ Transformers imported without metadata patches")
+    except Exception as import_err:
+        print(f"❌ Transformers import failed completely: {import_err}")
 
 # -- Fix for cv2/OpenCV --
 # This is more of a check to ensure transformers can find cv2
@@ -360,24 +671,40 @@ except ImportError:
 except Exception as e:
     print(f"⚠️ An unexpected error occurred during cv2 check: {e}")
 
-# -- Patch for missing Gemma3N VLM bias parameter --
+# -- Robust patch for missing Gemma3N VLM bias parameter --
 try:
     import mlx_vlm.utils as vlm_utils
-    if not hasattr(vlm_utils, '__bias_patch_applied'):
+
+    if not getattr(vlm_utils, '__bias_patch_applied', False):
+
         orig_sanitize = vlm_utils.sanitize_weights
-        def patched_sanitize(model_obj, weights, config=None):
-            weights = orig_sanitize(model_obj, weights, config)
+
+        def _ensure_bias(weights):
             bias_key = 'vision_tower.timm_model.conv_stem.conv.bias'
             weight_key = 'vision_tower.timm_model.conv_stem.conv.weight'
             if bias_key not in weights and weight_key in weights:
                 try:
                     import mlx.core as mx
                     w = weights[weight_key]
-                    weights[bias_key] = mx.zeros((w.shape[0],), dtype=w.dtype)
-                    print('✅ Patched missing VLM conv_stem bias')
+                    out_channels = w.shape[0] if hasattr(w, 'shape') else len(w)
+                    dtype = getattr(w, 'dtype', mx.float32)
+                    weights[bias_key] = mx.zeros((out_channels,), dtype=dtype)
+                    print('✅ Injected zero VLM conv_stem bias')
                 except Exception as e:
-                    print(f'⚠️ Failed to patch VLM bias: {e}')
+                    print(f'⚠️ Bias injection failed: {e}')
+
+        def patched_sanitize(model_obj, weights, config=None):
+            _ensure_bias(weights)  # pre-patch
+            try:
+                weights = orig_sanitize(model_obj, weights, config)
+            except Exception as first_err:
+                _ensure_bias(weights)
+                try:
+                    weights = orig_sanitize(model_obj, weights, config)
+                except Exception:
+                    raise first_err
             return weights
+
         vlm_utils.sanitize_weights = patched_sanitize
         vlm_utils.__bias_patch_applied = True
 except Exception as e:
@@ -421,27 +748,235 @@ PYINSTALLER_CMD=(
     "--copy-metadata" "mlx-vlm"
     "--copy-metadata" "mlx-lm"
     "--copy-metadata" "Jinja2"
+    "--copy-metadata" "jinja2"
+    "--copy-metadata" "MarkupSafe"
     "--copy-metadata" "opencv-python-headless"
+    "--copy-metadata" "scipy"
+    "--copy-metadata" "scikit-learn"
+    "--copy-metadata" "numba"
+    "--copy-metadata" "librosa"
+    "--copy-metadata" "soundfile"
+    "--copy-metadata" "datasets"
+    "--copy-metadata" "gradio"
+    "--copy-metadata" "fastapi"
+    "--copy-metadata" "uvicorn"
+    "--copy-metadata" "mlx"
+    "--copy-metadata" "ffmpeg"
+    "--copy-metadata" "ffmpeg-binaries"
     # Include HTML templates and media assets
     "--add-data" "src/mlx_gui/templates:mlx_gui/templates"
     "--add-data" "media:media"
     "--hidden-import" "scipy.sparse.csgraph._validation"
     "--hidden-import" "mlx._reprlib_fix"
     "--hidden-import" "Jinja2"
+    "--hidden-import" "jinja2"
+    "--hidden-import" "MarkupSafe"
+    "--hidden-import" "mlx_lm"
+    "--hidden-import" "mlx_lm.models"
+    "--hidden-import" "mlx_lm.models.qwen3"
+    "--hidden-import" "mlx_lm.models.gemma3_text"
+    "--hidden-import" "ffmpeg"
     "--exclude-module" "tkinter"
     "--exclude-module" "PySide6"
     "--exclude-module" "PyQt6"
     "--exclude-module" "wx"
+    # Aggressive SSL conflict prevention
+    "--exclude-module" "OpenSSL"
+    "--exclude-module" "pyOpenSSL"
+    # Exclude problematic PyTorch/Triton modules that cause TORCH_LIBRARY conflicts
+    "--exclude-module" "torch.utils.cpp_extension"
+    "--exclude-module" "triton"
+    "--exclude-module" "torchvision.io"
+    "--exclude-module" "torchvision.ops"
+    # Exclude problematic binaries by pattern
+    "--exclude" "*libcrypto*.dylib"
+    "--exclude" "*libssl*.dylib"
+    "--exclude" "*triton*"
+    "--exclude" "*libtorch*"
 )
 
 # Read version from Python module
 VERSION=$(python3 -c "from src.mlx_gui import __version__; print(__version__)")
 echo "📝 Building version: $VERSION"
 
-# Run PyInstaller with all the options
-echo "🔨 Building app bundle with PyInstaller..."
-# shellcheck disable=SC2086
-"${PYINSTALLER_CMD[@]}"
+# Create a custom .spec file for maximum control over SSL library exclusion
+echo "🔨 Creating custom spec file for SSL conflict resolution..."
+cat > MLX-GUI.spec << 'SPEC_EOF'
+# -*- mode: python ; coding: utf-8 -*-
+
+import os
+from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs
+
+# Environment for model downloads prevention
+os.environ['HF_HUB_OFFLINE'] = '1'
+os.environ['TRANSFORMERS_OFFLINE'] = '1'
+os.environ['HF_DATASETS_OFFLINE'] = '1'
+
+def selective_ssl_filter(datas_or_binaries):
+    """
+    Smart SSL library filtering - only exclude OpenCV's conflicting SSL libraries
+    while preserving Python's required SSL dependencies
+    """
+    
+    filtered = []
+    for item in datas_or_binaries:
+        # Handle different tuple formats (binaries vs datas)
+        if len(item) == 2:
+            src, dest = item
+        elif len(item) == 3:
+            dest, src, typecode = item
+        else:
+            # Unknown format, keep as-is
+            filtered.append(item)
+            continue
+            
+        # Only exclude OpenCV's SSL libraries specifically
+        should_exclude = False
+        
+        # Check if this is from OpenCV's bundled libraries that cause conflicts
+        if 'cv2' in src and ('libssl' in src or 'libcrypto' in src):
+            should_exclude = True
+        # Also exclude mbedcrypto from OpenCV
+        elif 'cv2' in src and 'mbedcrypto' in src:
+            should_exclude = True
+        # Exclude general OpenCV SSL/crypto dylibs that end up in the wrong place
+        elif src.endswith('__dot__dylibs/libssl.3.dylib') or src.endswith('__dot__dylibs/libcrypto.3.dylib'):
+            should_exclude = True
+        
+        if should_exclude:
+            print(f"🚫 SPEC: Excluding OpenCV SSL library: {os.path.basename(src)}")
+        else:
+            filtered.append(item)
+    
+    return filtered
+
+a = Analysis(
+    ['src/mlx_gui/app_main.py'],
+    pathex=[],
+    binaries=[
+        ('ffmpeg_binaries/ffmpeg', 'ffmpeg'),
+        ('ffmpeg_binaries/ffprobe', 'ffprobe'),
+    ],
+    datas=[
+        ('src/mlx_gui/templates', 'mlx_gui/templates'),
+        ('media', 'media'),
+    ],
+    hiddenimports=[
+        'scipy.sparse.csgraph._validation',
+        'mlx._reprlib_fix', 
+        'Jinja2',
+        'cv2',
+        'cv2.cv2',
+        'transformers',
+        'transformers.utils',
+        'transformers.models',
+        'tqdm',
+        'tqdm.auto'
+    ],
+    hookspath=['hooks'],
+    hooksconfig={},
+    runtime_hooks=['rthooks/pyi_rth_all_fixes.py'],
+    excludes=[
+        'tkinter', 'PySide6', 'PyQt6', 'wx', 
+        'OpenSSL', 'pyOpenSSL',
+        'torch.utils.cpp_extension', 'triton', 
+        'torchvision.io', 'torchvision.ops'
+    ],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=None,
+    noarchive=False,
+)
+
+# Post-process to remove SSL conflicts and add system SSL libraries
+print("🛡️  SPEC: Applying selective SSL filtering and adding system SSL libraries...")
+original_binary_count = len(a.binaries)
+original_data_count = len(a.datas)
+
+a.binaries = selective_ssl_filter(a.binaries)
+a.datas = selective_ssl_filter(a.datas)
+
+# Add system SSL libraries that Python needs
+import subprocess
+try:
+    # Find the system OpenSSL libraries that Python uses
+    result = subprocess.run(['python', '-c', 'import ssl; print(ssl.OPENSSL_VERSION)'], 
+                          capture_output=True, text=True)
+    print(f"Python SSL version: {result.stdout.strip()}")
+    
+    # Add the system libssl and libcrypto libraries 
+    # These are typically in /opt/homebrew/lib/ or /usr/local/lib/
+    ssl_paths = [
+        '/opt/homebrew/lib/libssl.3.dylib',
+        '/opt/homebrew/lib/libcrypto.3.dylib',
+        '/usr/local/lib/libssl.3.dylib', 
+        '/usr/local/lib/libcrypto.3.dylib'
+    ]
+    
+    for ssl_path in ssl_paths:
+        if os.path.exists(ssl_path):
+            basename = os.path.basename(ssl_path)
+            a.binaries.append((basename, ssl_path, 'BINARY'))
+            print(f"✅ Added system SSL library: {basename}")
+            
+except Exception as e:
+    print(f"⚠️  Could not add system SSL libraries: {e}")
+
+# Note: Metadata collection for transformers causes build issues
+# The app works without perfect metadata, so we'll skip this for now
+print("📝 Skipping metadata collection to avoid build conflicts")
+
+print(f"   📦 Binaries filtered: {original_binary_count} → {len(a.binaries)}")
+print(f"   📄 Datas filtered: {original_data_count} → {len(a.datas)}")
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=None)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='MLX-GUI',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='MLX-GUI',
+)
+
+app = BUNDLE(
+    coll,
+    name='MLX-GUI.app',
+    icon='app_icon.icns',
+    bundle_identifier='org.matthewrogers.mlx-gui',
+    info_plist={
+        'LSUIElement': True,
+        'CFBundleShortVersionString': '1.2.0',
+        'CFBundleVersion': '1.2.0',
+    },
+)
+
+SPEC_EOF
+
+# Run PyInstaller with the custom spec file
+echo "🔨 Building app bundle with custom spec file..."
+pyinstaller MLX-GUI.spec --noconfirm --clean
 
 # Clean up temporary hook files
 echo "🧹 Cleaning up temporary hook files..."
