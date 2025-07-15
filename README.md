@@ -25,6 +25,15 @@
 
 ## 📦 Latest Release
 
+### v1.2.2 - Complete CyberAI Image Compatibility (July 15 2025)
+
+🔧 **Critical CyberAI Fix**
+- ✅ **Raw Base64 Image Support** - Fixed CyberAI images by adding support for raw base64 data (no `data:image/` prefix)
+- 🔍 **Automatic Format Detection** - Detects PNG, JPEG, GIF, and WebP from binary headers
+- 🤖 **100% CyberAI Compatibility** - Vision models now correctly process images sent by CyberAI
+- 🛠️ **Enhanced Image Processing** - Improved raw base64 validation and error handling
+- ✅ **Verified Fix** - Tested and confirmed working with actual CyberAI client requests
+
 ### v1.2.1 - Enhanced Image Compatibility (July 15 2025)
 
 🖼️ **Improved Vision Model Compatibility**

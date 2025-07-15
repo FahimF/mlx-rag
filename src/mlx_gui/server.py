@@ -435,8 +435,53 @@ async def _process_image_urls(image_urls: List[str]) -> List[str]:
                     continue
 
             else:
-                logger.warning(f"Unsupported image URL format: {image_url[:100]}...")
-                continue
+                # Check if this is raw base64 data (no data:image/ prefix)
+                logger.debug(f"Checking if raw base64 data: {image_url[:50]}...")
+                
+                # Try to decode as raw base64 - if it works, it's likely an image
+                try:
+                    # Raw base64 should only contain valid base64 characters
+                    import re
+                    if re.match(r'^[A-Za-z0-9+/]*={0,2}$', image_url) and len(image_url) > 100:
+                        logger.debug("Detected raw base64 image data")
+                        
+                        # Attempt to decode
+                        image_data = base64.b64decode(image_url)
+                        logger.debug(f"Successfully decoded raw base64: {len(image_data)} bytes")
+                        
+                        # Try to detect image format from the binary data
+                        ext = ".png"  # Default to PNG
+                        if image_data.startswith(b'\xFF\xD8\xFF'):
+                            ext = ".jpg"
+                        elif image_data.startswith(b'\x89PNG'):
+                            ext = ".png"
+                        elif image_data.startswith(b'GIF'):
+                            ext = ".gif"
+                        elif image_data.startswith(b'RIFF'):
+                            ext = ".webp"
+                        
+                        logger.debug(f"Detected image format: {ext}")
+                        
+                        # Save to temporary file
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                            tmp.write(image_data)
+                            temp_path = tmp.name
+                        
+                        # Verify file was created
+                        if os.path.exists(temp_path):
+                            file_size = os.path.getsize(temp_path)
+                            logger.debug(f"Created temporary file from raw base64: {temp_path} ({file_size} bytes)")
+                            processed_images.append(temp_path)
+                        else:
+                            logger.error(f"Temporary file was not created: {temp_path}")
+                    else:
+                        logger.warning(f"Unsupported image URL format: {image_url[:100]}...")
+                        continue
+                        
+                except Exception as base64_error:
+                    logger.warning(f"Failed to decode as raw base64: {base64_error}")
+                    logger.warning(f"Unsupported image URL format: {image_url[:100]}...")
+                    continue
 
         except Exception as e:
             logger.error(f"Failed to process image URL {image_url[:100]}...: {e}")
