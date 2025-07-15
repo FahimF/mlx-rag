@@ -231,6 +231,10 @@ def _format_chat_prompt(messages: List[ChatMessage]) -> tuple[List[Dict[str, Any
             # Handle standard text content
             chat_messages.append({"role": role, "content": content})
 
+    logger.error(f"🔧 Image collection complete: {len(all_images)} images found")
+    for i, img in enumerate(all_images):
+        logger.error(f"🔧 Collected image {i+1}: {img[:100]}{'...' if len(img) > 100 else ''}")
+    
     return chat_messages, all_images
 
 
@@ -295,6 +299,8 @@ async def _process_image_urls(image_urls: List[str]) -> List[str]:
     processed_images = []
 
     logger.error(f"🔧 _process_image_urls CALLED with {len(image_urls)} URLs")
+    for i, url in enumerate(image_urls):
+        logger.error(f"🔧 Image {i+1}: {url[:100]}{'...' if len(url) > 100 else ''}")
 
     for i, image_url in enumerate(image_urls):
         logger.debug(f"Processing image {i+1}/{len(image_urls)}: {image_url[:100]}...")
