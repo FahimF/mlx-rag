@@ -1247,16 +1247,20 @@ def create_app() -> FastAPI:
             messages = request.messages
             has_system_message = any(msg.role == "system" for msg in messages)
 
-            if not has_system_message:
-                # Add a helpful default system message
+            # Extract structured messages and image URLs first to check if we have images
+            chat_messages, images = _format_chat_prompt(messages)
+            
+            # Only add system message if no system message exists AND no images (vision models don't handle system messages well)
+            if not has_system_message and not images:
+                # Add a helpful default system message for non-vision models
                 default_system = ChatMessage(
                     role="system",
                     content="You are a helpful AI assistant. Provide clear, accurate, and concise responses."
                 )
                 messages = [default_system] + list(messages)
-
-            # Extract structured messages and image URLs
-            chat_messages, images = _format_chat_prompt(messages)
+                # Re-extract after adding system message
+                chat_messages, images = _format_chat_prompt(messages)
+            logger.error(f"🔧 After _format_chat_prompt: {len(images)} images extracted")
 
             # Enforce server-side maximum token limit
             MAX_TOKENS_LIMIT = 16384  # 16k max
@@ -1288,11 +1292,94 @@ def create_app() -> FastAPI:
             is_vision_model = False
             if loaded_model and hasattr(loaded_model.mlx_wrapper, 'model_type') and loaded_model.mlx_wrapper.model_type == "vision":
                 is_vision_model = True
+            logger.error(f"🔧 Vision model check: is_vision_model={is_vision_model}, model_type={getattr(loaded_model.mlx_wrapper, 'model_type', 'unknown') if loaded_model else 'no_model'}")
 
             # Handle streaming vs non-streaming
+            logger.error(f"🔧 Request stream setting: {request.stream}")
+            
+            # Check if we need to handle vision models with images in streaming
+            force_vision_streaming = False
+            if request.stream and is_vision_model and images:
+                logger.warning("Streaming not yet supported for vision models with images - using vision processing with streaming format")
+                force_vision_streaming = True
+            
             if request.stream:
-                # For all streaming, we must format to a string prompt
-                prompt_string = await _apply_chat_template(loaded_model.mlx_wrapper.tokenizer, chat_messages, request.model)
+                if force_vision_streaming:
+                    # Handle vision models in streaming by processing images and generating non-streaming, then formatting as streaming
+                    processed_image_paths = await _process_image_urls(images)
+                    result = await queued_generate_vision(request.model, chat_messages, processed_image_paths, config)
+                    # Clean up temporary image files
+                    for img_path in processed_image_paths:
+                        try:
+                            import os
+                            os.unlink(img_path)
+                        except Exception as e:
+                            logger.warning(f"Failed to cleanup temporary image file {img_path}: {e}")
+                    
+                    # Convert the result to streaming format
+                    async def generate_vision_stream():
+                        """Generate streaming response chunks for vision model."""
+                        first_chunk = ChatCompletionStreamResponse(
+                            id=completion_id,
+                            created=created_time,
+                            model=request.model,
+                            choices=[
+                                ChatCompletionStreamChoice(
+                                    index=0,
+                                    delta={"role": "assistant"},
+                                    finish_reason=None
+                                )
+                            ]
+                        )
+                        yield f"data: {first_chunk.model_dump_json()}\n\n"
+                        
+                        # Stream the complete result as chunks
+                        content = result.text if result else ""
+                        chunk_size = 10  # Characters per chunk
+                        
+                        for i in range(0, len(content), chunk_size):
+                            chunk_content = content[i:i+chunk_size]
+                            stream_chunk = ChatCompletionStreamResponse(
+                                id=completion_id,
+                                created=created_time,
+                                model=request.model,
+                                choices=[
+                                    ChatCompletionStreamChoice(
+                                        index=0,
+                                        delta={"content": chunk_content},
+                                        finish_reason=None
+                                    )
+                                ]
+                            )
+                            yield f"data: {stream_chunk.model_dump_json()}\n\n"
+                            # Small delay to make it feel like real streaming
+                            import asyncio
+                            await asyncio.sleep(0.01)
+                        
+                        # Final chunk with finish_reason
+                        final_chunk = ChatCompletionStreamResponse(
+                            id=completion_id,
+                            created=created_time,
+                            model=request.model,
+                            choices=[
+                                ChatCompletionStreamChoice(
+                                    index=0,
+                                    delta={},
+                                    finish_reason="stop"
+                                )
+                            ]
+                        )
+                        yield f"data: {final_chunk.model_dump_json()}\n\n"
+                        yield "data: [DONE]\n\n"
+
+                    return StreamingResponse(
+                        generate_vision_stream(),
+                        media_type="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+                    )
+                else:
+                    # For all other streaming (non-vision), format to a string prompt
+                    prompt_string = await _apply_chat_template(loaded_model.mlx_wrapper.tokenizer, chat_messages, request.model)
 
                 async def generate_stream():
                     """Generate streaming response chunks."""
