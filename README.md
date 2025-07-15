@@ -25,6 +25,15 @@
 
 ## 📦 Latest Release
 
+### v1.2.1 - Enhanced Image Compatibility (July 15 2025)
+
+🖼️ **Improved Vision Model Compatibility**
+- ✅ **Enhanced Image Format Support** - Fixed vision models not seeing images from certain OpenAI-compatible clients
+- 🔧 **Multiple Image URL Formats** - Now supports various ways clients send images (`image_url.url`, `image_url.image`, direct `image` fields)
+- 🤖 **CyberAI Compatibility** - Resolved image processing issues with CyberAI and other third-party clients
+- 🛠️ **Robust Image Parsing** - Added fallback handling for different OpenAI API image formats
+- 🎯 **Better Error Handling** - Improved debugging and error messages for image processing failures
+
 ### v1.2.0 - Advanced Memory Management & VLM Stability (July 13 2025)
 
 🧠 **Revolutionary Memory Management**

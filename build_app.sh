@@ -967,8 +967,8 @@ app = BUNDLE(
     bundle_identifier='org.matthewrogers.mlx-gui',
     info_plist={
         'LSUIElement': True,
-        'CFBundleShortVersionString': '1.2.0',
-        'CFBundleVersion': '1.2.0',
+        'CFBundleShortVersionString': '1.2.1',
+        'CFBundleVersion': '1.2.1',
     },
 )
 

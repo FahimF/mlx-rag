@@ -61,11 +61,14 @@ class ChatMessageContent(BaseModel):
     """Content part for multimodal messages."""
     type: str  # "text" or "image_url"
     text: Optional[str] = None
-    image_url: Optional[Dict[str, str]] = None
+    image_url: Optional[Union[Dict[str, str], str]] = None  # Can be dict or direct string
 
 class ChatMessage(BaseModel):
     role: Optional[str] = None  # "system", "user", "assistant"
     content: Optional[Union[str, List[ChatMessageContent]]] = None
+    # Alternative image fields that some clients might use
+    image: Optional[str] = None  # Single image as base64 or URL
+    images: Optional[List[str]] = None  # Multiple images array
 
 
 class ChatCompletionRequest(BaseModel):
@@ -218,10 +221,25 @@ def _format_chat_prompt(messages: List[ChatMessage]) -> tuple[List[Dict[str, Any
                 if part.type == "text" and part.text:
                     text_parts.append(part.text)
                 elif part.type == "image_url" and part.image_url:
-                    image_url = part.image_url.get("url", "")
+                    # Try different possible field names for the image URL
+                    image_url = ""
+                    if isinstance(part.image_url, dict):
+                        # Standard OpenAI format: {"url": "data:image/..."}
+                        image_url = part.image_url.get("url", "")
+                        # Alternative format: {"image": "data:image/..."}
+                        if not image_url:
+                            image_url = part.image_url.get("image", "")
+                        # Another alternative: {"data": "data:image/..."}
+                        if not image_url:
+                            image_url = part.image_url.get("data", "")
+                    elif isinstance(part.image_url, str):
+                        # Direct string format
+                        image_url = part.image_url
+                    
                     if image_url:
                         images.append(image_url)
                         all_images.append(image_url)
+                        logger.debug(f"Found image URL: {image_url[:50]}{'...' if len(image_url) > 50 else ''}")
 
             # Reconstruct content for the message dictionary
             reconstructed_content = " ".join(text_parts)
@@ -230,6 +248,19 @@ def _format_chat_prompt(messages: List[ChatMessage]) -> tuple[List[Dict[str, Any
         elif isinstance(content, str):
             # Handle standard text content
             chat_messages.append({"role": role, "content": content})
+        
+        # Check for alternative image fields in the message itself
+        # Some clients send images as separate fields like "image", "images", etc.
+        if hasattr(message, 'image') and message.image:
+            # Single image field
+            all_images.append(message.image)
+            logger.debug(f"Found image in message.image field: {message.image[:50]}{'...' if len(message.image) > 50 else ''}")
+        
+        if hasattr(message, 'images') and message.images:
+            # Multiple images field  
+            for img in message.images:
+                all_images.append(img)
+                logger.debug(f"Found image in message.images array: {img[:50]}{'...' if len(img) > 50 else ''}")
 
     logger.error(f"🔧 Image collection complete: {len(all_images)} images found")
     for i, img in enumerate(all_images):
