@@ -155,7 +155,7 @@
 
 ## 🏃‍♂️ Quick Start
 
-### Option 1: Download Standalone App
+### Option 1: Download Standalone App (Recommended for Mac Users)
 1. Download the latest `.app` from [Releases](https://github.com/RamboRogers/mlx-gui/releases)
 2. Drag to `/Applications`
 3. Launch - no Python installation required!
@@ -165,7 +165,19 @@
 
 > *📝 Models may take a few minutes to load. They are gigabytes in size and will download at your internet speed.*
 
-### Option 2: Install from Source
+### Option 2: Install from PyPI
+```bash
+# Install MLX-GUI
+pip install mlx-gui
+
+# Launch with system tray
+mlx-gui tray
+
+# Or launch server only
+mlx-gui start --port 8000
+```
+
+### Option 3: Install from Source
 ```bash
 # Clone the repository
 git clone https://github.com/RamboRogers/mlx-gui.git
