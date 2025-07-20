@@ -83,6 +83,12 @@ class HuggingFaceClient:
             "175b": 175.0,
             "235b": 235.0,  # Qwen3-235B
             "405b": 405.0,
+            "424b": 424.0,  # ERNIE 4.5
+            # Trillion-scale models
+            "1t": 1000.0,
+            "1.02t": 1020.0,  # Kimi-K2-Instruct
+            "1.5t": 1500.0,
+            "2t": 2000.0,
             # Add additional patterns for unconventional naming
             "1.3b": 1.3,
             "2.8b": 2.8,
@@ -126,6 +132,33 @@ class HuggingFaceClient:
             "70.0b": 70.0,
         }
     
+    def search_trending_mlx_models(self, limit: int = 20) -> List[ModelInfo]:
+        """Search for trending MLX models from HuggingFace."""
+        try:
+            models = list_models(
+                library="mlx",
+                sort="downloads",
+                limit=limit,
+                direction=-1,
+                token=self.token
+            )
+            
+            model_infos = []
+            for model in models:
+                try:
+                    info = self._extract_model_info(model)
+                    if info and info.mlx_compatible:
+                        model_infos.append(info)
+                except Exception as e:
+                    logger.warning(f"Error processing trending model {model.id}: {e}")
+                    continue
+            
+            return model_infos
+            
+        except Exception as e:
+            logger.error(f"Error searching trending MLX models: {e}")
+            return []
+
     def search_mlx_models(self, 
                          query: str = "",
                          limit: int = 50,
@@ -396,7 +429,7 @@ class HuggingFaceClient:
                 # Determine bits per parameter from quantization
                 bits_per_param = 16  # Default FP16
                 
-                if "4bit" in model_name or "4-bit" in model_name or "qat-4bit" in model_name:
+                if "4bit" in model_name or "4-bit" in model_name or "qat-4bit" in model_name or "dwq" in model_name:
                     bits_per_param = 4
                 elif "6bit" in model_name or "6-bit" in model_name:
                     bits_per_param = 6
@@ -429,9 +462,9 @@ class HuggingFaceClient:
     def _determine_model_type(self, model, tags: List[str]) -> str:
         """Determine model type from tags and metadata."""
         tags_lower = [tag.lower() for tag in tags]
+        pipeline_tag = getattr(model, 'pipeline_tag', '').lower()
         
         # Check for embedding models first (by pipeline tag)
-        pipeline_tag = getattr(model, 'pipeline_tag', '')
         if pipeline_tag == 'feature-extraction':
             return 'embedding'
         
@@ -444,16 +477,40 @@ class HuggingFaceClient:
         if any(pattern in model_name_lower for pattern in ['embedding', 'bge-', 'e5-', 'all-minilm', 'sentence']):
             return 'embedding'
         
-        # Check for multimodal capabilities
-        if any(tag in tags_lower for tag in ['multimodal', 'vision', 'image-text', 'vlm']):
+        # Check for multimodal capabilities (expanded detection)
+        # Priority: Check pipeline tags first for multimodal
+        multimodal_pipeline_tags = [
+            'image-text-to-text', 'audio-text-to-text', 'video-text-to-text',
+            'image-to-text', 'visual-question-answering', 'multimodal'
+        ]
+        if pipeline_tag in multimodal_pipeline_tags:
             return 'multimodal'
         
-        # Check for vision models
-        if any(tag in tags_lower for tag in ['computer-vision', 'image-classification', 'object-detection']):
+        # Check multimodal tags (expanded list)
+        multimodal_tags = [
+            'multimodal', 'vision', 'image-text', 'vlm', 'visual-language-model',
+            'image-text-to-text', 'audio-text-to-text', 'video-text-to-text',
+            'image-to-text', 'visual-question-answering', 'vqa'
+        ]
+        if any(tag in tags_lower for tag in multimodal_tags):
+            return 'multimodal'
+        
+        # Check for models that combine multiple modalities (smart detection)
+        has_vision = any(tag in tags_lower for tag in ['vision', 'image', 'visual', 'computer-vision'])
+        has_audio = any(tag in tags_lower for tag in ['audio', 'speech', 'automatic-speech-recognition'])
+        has_text = any(tag in tags_lower for tag in ['text-generation', 'language-modeling', 'causal-lm'])
+        
+        # If model has multiple modalities, classify as multimodal
+        modality_count = sum([has_vision, has_audio, has_text])
+        if modality_count >= 2:
+            return 'multimodal'
+        
+        # Check for vision-only models
+        if has_vision or any(tag in tags_lower for tag in ['computer-vision', 'image-classification', 'object-detection']):
             return 'vision'
         
-        # Check for audio models
-        if any(tag in tags_lower for tag in ['audio', 'speech', 'automatic-speech-recognition', 'text-to-speech', 'tts', 'whisper']):
+        # Check for audio-only models (only if not already classified as multimodal)
+        if has_audio or any(tag in tags_lower for tag in ['text-to-speech', 'tts', 'whisper']):
             return 'audio'
         
         # Check for text generation models
@@ -466,9 +523,41 @@ class HuggingFaceClient:
         
         return 'text'  # Default
     
+    def get_specific_trending_models(self) -> List[str]:
+        """Get list of specific high-priority trending models to add."""
+        return [
+            "mlx-community/SmolLM3-3B-4bit",
+            "mlx-community/SmolLM3-3B-Instruct-4bit",
+            "mlx-community/Kimi-Dev-72B-4bit-DWQ",
+            "mlx-community/Kimi-K2-Instruct-4bit",
+            "mlx-community/Llama-3.2-3B-Instruct-4bit",
+            "mlx-community/Gemma-2-9B-it-4bit", 
+            "mlx-community/Qwen3-30B-A3B-4bit-DWQ",
+            "mlx-community/Qwen3-235B-A22B-4bit-DWQ",
+            "mlx-community/Mistral-Small-Instruct-2409-4bit",
+            "mlx-community/Codestral-22B-v0.1-4bit",
+            "mlx-community/Mistral-Nemo-Instruct-2407-4bit"
+        ]
+    
+    def get_specific_embedding_models(self) -> List[str]:
+        """Get list of high-priority MLX embedding models."""
+        return [
+            "mlx-community/bge-large-en-v1.5-4bit",
+            "mlx-community/bge-base-en-v1.5-4bit", 
+            "mlx-community/e5-large-v2-4bit",
+            "mlx-community/e5-base-v2-4bit",
+            "mlx-community/nomic-embed-text-v1.5-4bit",
+            "mlx-community/gte-large-4bit",
+            "mlx-community/sentence-transformers-all-MiniLM-L6-v2-4bit",
+            "mlx-community/multilingual-e5-large-4bit",
+            "mlx-community/text-embedding-ada-002-4bit"
+        ]
+
     def get_model_categories(self) -> Dict[str, List[str]]:
         """Get categorized lists of popular MLX models."""
         categories = {
+            'Trending Models': self.get_specific_trending_models(),
+            'Embedding Models': self.get_specific_embedding_models(),
             'Popular Chat': [],
             'Popular TTS': [],
             'Popular STT': [],
@@ -631,41 +720,67 @@ class HuggingFaceClient:
             embedding_models = []
             models_dict = {}
             
-            # Method 1: Use pipeline_tag=feature-extraction (the standard for embedding models)
+            # Method 1: Use pipeline_tag=feature-extraction&library=mlx (exact match to URL)
             try:
-                logger.info("Searching for embedding models using pipeline_tag=feature-extraction")
+                logger.info("Searching for embedding models using pipeline_tag=feature-extraction&library=mlx")
                 
-                # This matches: https://huggingface.co/models?pipeline_tag=feature-extraction&sort=trending
+                # This matches exactly: https://huggingface.co/models?pipeline_tag=feature-extraction&library=mlx&sort=downloads
                 pipeline_models = list_models(
                     pipeline_tag="feature-extraction",
-                    sort="downloads",
-                    limit=100,  # Get more to filter from
+                    library="mlx",
+                    sort="downloads", 
+                    limit=50,  # More focused search with library filter
                     direction=-1,
                     token=self.token
                 )
                 
                 # Convert generator to list and count
                 pipeline_models_list = list(pipeline_models)
-                logger.info(f"Found {len(pipeline_models_list)} feature-extraction models")
+                logger.info(f"Found {len(pipeline_models_list)} MLX feature-extraction models with library filter")
                 
-                # Filter for MLX-compatible ones manually
-                mlx_count = 0
+                # Add all models since they already have library=mlx filter
                 for model in pipeline_models_list:
-                    # Check if model has MLX in tags or is from mlx-community
-                    model_tags = getattr(model, 'tags', []) or []
-                    is_mlx = (any(tag.lower() in self.mlx_tags for tag in model_tags) or 
-                             model.id.startswith('mlx-community/') or
-                             'mlx' in model.id.lower())
-                    
-                    if is_mlx:
-                        models_dict[model.id] = model
-                        mlx_count += 1
-                        logger.debug(f"Found MLX embedding model: {model.id}")
+                    models_dict[model.id] = model
+                    logger.debug(f"Found MLX embedding model: {model.id}")
                 
-                logger.info(f"Found {mlx_count} MLX-compatible embedding models from pipeline filter")
+                logger.info(f"Added {len(pipeline_models_list)} MLX embedding models from pipeline+library filter")
                 
             except Exception as e:
-                logger.warning(f"Error using HuggingFace pipeline_tag filter for embeddings: {e}")
+                logger.warning(f"Error using HuggingFace pipeline_tag+library filter for embeddings: {e}")
+            
+            # Method 1.5: Fallback without library filter for broader coverage
+            try:
+                logger.info("Fallback: Searching feature-extraction models without library filter")
+                
+                all_embedding_models = list_models(
+                    pipeline_tag="feature-extraction",
+                    sort="downloads",
+                    limit=100,
+                    direction=-1,
+                    token=self.token
+                )
+                
+                all_embedding_list = list(all_embedding_models)
+                logger.info(f"Found {len(all_embedding_list)} total feature-extraction models")
+                
+                # Filter for MLX-compatible ones manually
+                mlx_fallback_count = 0
+                for model in all_embedding_list:
+                    if model.id not in models_dict:  # Only add if not already found
+                        model_tags = getattr(model, 'tags', []) or []
+                        is_mlx = (any(tag.lower() in self.mlx_tags for tag in model_tags) or 
+                                 model.id.startswith('mlx-community/') or
+                                 'mlx' in model.id.lower())
+                        
+                        if is_mlx:
+                            models_dict[model.id] = model
+                            mlx_fallback_count += 1
+                            logger.debug(f"Found additional MLX embedding model: {model.id}")
+                
+                logger.info(f"Added {mlx_fallback_count} additional MLX embedding models from fallback search")
+                
+            except Exception as e:
+                logger.warning(f"Error in fallback embedding search: {e}")
             
             # Method 2: Search with MLX tag and embedding-related terms
             try:
@@ -704,7 +819,11 @@ class HuggingFaceClient:
             
             # Method 3: Search for known embedding model patterns
             try:
-                embedding_patterns = ["Qwen3-Embedding", "bge-", "e5-", "all-MiniLM", "sentence-transformers"]
+                embedding_patterns = [
+                    "bge-", "e5-", "all-MiniLM", "sentence-transformers", 
+                    "nomic-embed", "gte-", "intfloat", "Qwen3-Embedding",
+                    "multilingual-e5", "text-embedding", "embed-"
+                ]
                 for pattern in embedding_patterns:
                     try:
                         pattern_models = list_models(

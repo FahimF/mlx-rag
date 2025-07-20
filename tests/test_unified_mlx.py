@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
 🧪 MLX-GUI Unified Test Suite
-Tests all MLX model types: Text, Audio, and Vision
+Tests all MLX model types: Text, Audio, Vision, and Embeddings
+
+Includes support for:
+- Text models: Qwen3, DeepSeek R1, SmolLM3 (multilingual)
+- Audio models: Parakeet (transcription)
+- Vision models: Gemma 3n, Qwen2-VL (multimodal)
+- Embedding models: Qwen3 embeddings
 """
 
 import asyncio
@@ -22,7 +28,8 @@ TIMEOUT = 120.0
 TEST_MODELS = {
     "text": {
         "qwen3": "qwen3-8b-6bit",
-        "deepseek": "deepseek-r1-0528-qwen3-8b-mlx-8bit"  # DeepSeek R1 based on Qwen3
+        "deepseek": "deepseek-r1-0528-qwen3-8b-mlx-8bit",  # DeepSeek R1 based on Qwen3
+        "smollm3": "smollm3-3b-4bit"  # SmolLM3 multilingual model
     },
     "audio": {
         "parakeet": "parakeet-tdt-0-6b-v2"
@@ -203,9 +210,11 @@ class MLXTestSuite:
                 message = result['choices'][0]['message']['content'].strip()
                 usage = result['usage']
 
-                # Special check for Qwen3 and Gemma3 models (test our processor fix)
+                # Special check for different model types
                 if "qwen3" in model_name.lower() or "gemma3" in model_name.lower():
                     extra_info = " (Processor fix working!)"
+                elif "smollm3" in model_name.lower():
+                    extra_info = " (SmolLM3 multilingual model working!)"
                 else:
                     extra_info = ""
 
@@ -741,6 +750,7 @@ class MLXTestSuite:
         # Models to load in sequence - these should trigger memory management
         test_models = [
             ("deepseek-r1-0528-qwen3-8b-mlx-8bit", "DeepSeek R1 8B"),
+            ("smollm3-3b-4bit", "SmolLM3 3B Multilingual"),
             ("gemma-3-27b-it-qat-4bit", "Gemma 3 27B QAT"),
             ("gemma-3n-e4b-it-mlx-8bit", "Gemma 3n 8B Vision"),
             ("qwen3-8b-6bit", "Qwen3 8B"),  # This should trigger unloading

@@ -235,7 +235,7 @@ def _format_chat_prompt(messages: List[ChatMessage]) -> tuple[List[Dict[str, Any
                     elif isinstance(part.image_url, str):
                         # Direct string format
                         image_url = part.image_url
-                    
+
                     if image_url:
                         images.append(image_url)
                         all_images.append(image_url)
@@ -248,16 +248,16 @@ def _format_chat_prompt(messages: List[ChatMessage]) -> tuple[List[Dict[str, Any
         elif isinstance(content, str):
             # Handle standard text content
             chat_messages.append({"role": role, "content": content})
-        
+
         # Check for alternative image fields in the message itself
         # Some clients send images as separate fields like "image", "images", etc.
         if hasattr(message, 'image') and message.image:
             # Single image field
             all_images.append(message.image)
             logger.debug(f"Found image in message.image field: {message.image[:50]}{'...' if len(message.image) > 50 else ''}")
-        
+
         if hasattr(message, 'images') and message.images:
-            # Multiple images field  
+            # Multiple images field
             for img in message.images:
                 all_images.append(img)
                 logger.debug(f"Found image in message.images array: {img[:50]}{'...' if len(img) > 50 else ''}")
@@ -265,7 +265,7 @@ def _format_chat_prompt(messages: List[ChatMessage]) -> tuple[List[Dict[str, Any
     logger.error(f"🔧 Image collection complete: {len(all_images)} images found")
     for i, img in enumerate(all_images):
         logger.error(f"🔧 Collected image {i+1}: {img[:100]}{'...' if len(img) > 100 else ''}")
-    
+
     return chat_messages, all_images
 
 
@@ -437,18 +437,18 @@ async def _process_image_urls(image_urls: List[str]) -> List[str]:
             else:
                 # Check if this is raw base64 data (no data:image/ prefix)
                 logger.debug(f"Checking if raw base64 data: {image_url[:50]}...")
-                
+
                 # Try to decode as raw base64 - if it works, it's likely an image
                 try:
                     # Raw base64 should only contain valid base64 characters
                     import re
                     if re.match(r'^[A-Za-z0-9+/]*={0,2}$', image_url) and len(image_url) > 100:
                         logger.debug("Detected raw base64 image data")
-                        
+
                         # Attempt to decode
                         image_data = base64.b64decode(image_url)
                         logger.debug(f"Successfully decoded raw base64: {len(image_data)} bytes")
-                        
+
                         # Try to detect image format from the binary data
                         ext = ".png"  # Default to PNG
                         if image_data.startswith(b'\xFF\xD8\xFF'):
@@ -459,14 +459,14 @@ async def _process_image_urls(image_urls: List[str]) -> List[str]:
                             ext = ".gif"
                         elif image_data.startswith(b'RIFF'):
                             ext = ".webp"
-                        
+
                         logger.debug(f"Detected image format: {ext}")
-                        
+
                         # Save to temporary file
                         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
                             tmp.write(image_data)
                             temp_path = tmp.name
-                        
+
                         # Verify file was created
                         if os.path.exists(temp_path):
                             file_size = os.path.getsize(temp_path)
@@ -477,7 +477,7 @@ async def _process_image_urls(image_urls: List[str]) -> List[str]:
                     else:
                         logger.warning(f"Unsupported image URL format: {image_url[:100]}...")
                         continue
-                        
+
                 except Exception as base64_error:
                     logger.warning(f"Failed to decode as raw base64: {base64_error}")
                     logger.warning(f"Unsupported image URL format: {image_url[:100]}...")
@@ -1017,6 +1017,42 @@ def create_app() -> FastAPI:
                 detail="Error getting popular models"
             )
 
+    @app.get("/v1/discover/trending")
+    async def discover_trending_models(limit: int = 20):
+        """Get trending MLX models from HuggingFace."""
+        try:
+            hf_client = get_huggingface_client()
+            models = hf_client.search_trending_mlx_models(limit=limit)
+
+            return {
+                "models": [
+                    {
+                        "id": model.id,
+                        "name": model.name,
+                        "author": model.author,
+                        "downloads": model.downloads,
+                        "likes": model.likes,
+                        "model_type": model.model_type,
+                        "size_gb": model.size_gb,
+                        "estimated_memory_gb": model.estimated_memory_gb,
+                        "mlx_compatible": model.mlx_compatible,
+                        "has_mlx_version": model.has_mlx_version,
+                        "mlx_repo_id": model.mlx_repo_id,
+                        "tags": model.tags,
+                        "description": model.description,
+                        "updated_at": model.updated_at
+                    }
+                    for model in models
+                ],
+                "total": len(models)
+            }
+        except Exception as e:
+            logger.error(f"Error getting trending models: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error getting trending models"
+            )
+
     @app.get("/v1/discover/categories")
     async def get_model_categories():
         """Get categorized model lists."""
@@ -1249,7 +1285,7 @@ def create_app() -> FastAPI:
 
             # Extract structured messages and image URLs first to check if we have images
             chat_messages, images = _format_chat_prompt(messages)
-            
+
             # Only add system message if no system message exists AND no images (vision models don't handle system messages well)
             if not has_system_message and not images:
                 # Add a helpful default system message for non-vision models
@@ -1296,13 +1332,13 @@ def create_app() -> FastAPI:
 
             # Handle streaming vs non-streaming
             logger.error(f"🔧 Request stream setting: {request.stream}")
-            
+
             # Check if we need to handle vision models with images in streaming
             force_vision_streaming = False
             if request.stream and is_vision_model and images:
                 logger.warning("Streaming not yet supported for vision models with images - using vision processing with streaming format")
                 force_vision_streaming = True
-            
+
             if request.stream:
                 if force_vision_streaming:
                     # Handle vision models in streaming by processing images and generating non-streaming, then formatting as streaming
@@ -1315,7 +1351,7 @@ def create_app() -> FastAPI:
                             os.unlink(img_path)
                         except Exception as e:
                             logger.warning(f"Failed to cleanup temporary image file {img_path}: {e}")
-                    
+
                     # Convert the result to streaming format
                     async def generate_vision_stream():
                         """Generate streaming response chunks for vision model."""
@@ -1332,11 +1368,11 @@ def create_app() -> FastAPI:
                             ]
                         )
                         yield f"data: {first_chunk.model_dump_json()}\n\n"
-                        
+
                         # Stream the complete result as chunks
                         content = result.text if result else ""
                         chunk_size = 10  # Characters per chunk
-                        
+
                         for i in range(0, len(content), chunk_size):
                             chunk_content = content[i:i+chunk_size]
                             stream_chunk = ChatCompletionStreamResponse(
@@ -1355,7 +1391,7 @@ def create_app() -> FastAPI:
                             # Small delay to make it feel like real streaming
                             import asyncio
                             await asyncio.sleep(0.01)
-                        
+
                         # Final chunk with finish_reason
                         final_chunk = ChatCompletionStreamResponse(
                             id=completion_id,
@@ -1961,8 +1997,8 @@ def create_app() -> FastAPI:
         """Get detailed status of a specific model."""
         try:
             model_manager = get_model_manager()
-            status = model_manager.get_model_status(model_name)
-            return status
+            model_status = model_manager.get_model_status(model_name)
+            return model_status
         except Exception as e:
             logger.error(f"Error getting model status for {model_name}: {e}")
             raise HTTPException(

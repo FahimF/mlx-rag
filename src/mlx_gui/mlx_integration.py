@@ -577,9 +577,33 @@ class MLXLoader:
         os.makedirs(self.cache_dir, exist_ok=True)
 
     def download_model(self, model_id: str, token: Optional[str] = None) -> str:
-        """Download model from HuggingFace Hub."""
+        """Download model from HuggingFace Hub with progress tracking."""
         try:
             logger.info(f"Downloading model {model_id}")
+
+            # Initialize progress tracking
+            if hasattr(self, '_download_progress'):
+                self._download_progress[model_id] = {
+                    'status': 'downloading',
+                    'progress': 0,
+                    'downloaded_mb': 0,
+                    'total_mb': 0,
+                    'speed_mbps': 0,
+                    'eta_seconds': 0,
+                    'stage': 'Starting download...'
+                }
+            else:
+                self._download_progress = {
+                    model_id: {
+                        'status': 'downloading',
+                        'progress': 0,
+                        'downloaded_mb': 0,
+                        'total_mb': 0,
+                        'speed_mbps': 0,
+                        'eta_seconds': 0,
+                        'stage': 'Starting download...'
+                    }
+                }
 
             # Increase file descriptor limit temporarily
             import resource
@@ -589,6 +613,12 @@ class MLXLoader:
             except ValueError:
                 logger.warning("Could not increase file descriptor limit")
 
+            # Update progress to show download starting
+            self._download_progress[model_id].update({
+                'stage': 'Downloading model files...',
+                'progress': 5
+            })
+
             local_path = snapshot_download(
                 repo_id=model_id,
                 cache_dir=self.cache_dir,
@@ -596,6 +626,14 @@ class MLXLoader:
                 local_files_only=False,
                 max_workers=4  # Limit concurrent downloads
             )
+
+            # Update progress to show download complete
+            if model_id in self._download_progress:
+                self._download_progress[model_id].update({
+                    'status': 'download_complete',
+                    'progress': 95,
+                    'stage': 'Download complete, loading into memory...'
+                })
 
             # Restore original limit
             try:
@@ -607,8 +645,42 @@ class MLXLoader:
             return local_path
 
         except Exception as e:
+            # Clean up progress tracking on error
+            if hasattr(self, '_download_progress') and model_id in self._download_progress:
+                self._download_progress[model_id].update({
+                    'status': 'failed',
+                    'stage': f'Download failed: {str(e)}'
+                })
             logger.error(f"Error downloading model {model_id}: {e}")
             raise
+        finally:
+            # Clean up progress tracking when done (success or failure)
+            if hasattr(self, '_download_progress') and model_id in self._download_progress:
+                # Keep progress for a short time for final status check
+                import threading
+                def cleanup_progress():
+                    import time
+                    time.sleep(30)  # Keep for 30 seconds
+                    if hasattr(self, '_download_progress') and model_id in self._download_progress:
+                        del self._download_progress[model_id]
+
+                cleanup_thread = threading.Thread(target=cleanup_progress)
+                cleanup_thread.daemon = True
+                cleanup_thread.start()
+
+    def get_download_progress(self, model_id: str) -> dict:
+        """Get current download progress for a model."""
+        if hasattr(self, '_download_progress') and model_id in self._download_progress:
+            return self._download_progress[model_id].copy()
+        return {
+            'status': 'not_downloading',
+            'progress': 0,
+            'downloaded_mb': 0,
+            'total_mb': 0,
+            'speed_mbps': 0,
+            'eta_seconds': 0,
+            'stage': 'No download in progress'
+        }
 
     def load_model(self, model_path: str) -> MLXModelWrapper:
         """Load a model using appropriate MLX library."""
@@ -933,6 +1005,10 @@ class MLXInferenceEngine:
             "config": wrapper.config,
             "estimated_memory_gb": wrapper.config.get("estimated_memory_gb", 0)
         }
+
+    def get_download_progress(self, model_id: str) -> dict:
+        """Get current download progress for a model."""
+        return self.loader.get_download_progress(model_id)
 
 
 # Global inference engine

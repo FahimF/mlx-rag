@@ -20,7 +20,7 @@ import threading
 import mlx.core as mx
 from sqlalchemy.orm import Session
 
-from mlx_gui.database import get_database_manager
+from mlx_gui.database import get_database_manager, get_db_session
 from mlx_gui.models import Model, ModelStatus, InferenceRequest, RequestQueue, QueueStatus
 from mlx_gui.system_monitor import get_system_monitor
 from mlx_gui.mlx_integration import get_inference_engine, MLXModelWrapper, GenerationConfig, GenerationResult
@@ -708,7 +708,7 @@ class ModelManager:
             status = self._loading_status.get(model_name, LoadingStatus.IDLE)
             loaded_model = self._loaded_models.get(model_name)
 
-            return {
+            result = {
                 "name": model_name,
                 "status": status.value,
                 "loaded": loaded_model is not None,
@@ -720,6 +720,30 @@ class ModelManager:
                     None
                 )
             }
+
+            # Add real download progress if model is being downloaded
+            if status == LoadingStatus.LOADING:
+                # Get model path from database to find the HuggingFace model ID
+                db = next(get_db_session())
+                try:
+                    model_record = db.query(Model).filter(Model.name == model_name).first()
+                    if model_record:
+                        # Get download progress from MLX loader
+                        inference_engine = get_inference_engine()
+                        download_progress = inference_engine.get_download_progress(model_record.path)
+                        result.update({
+                            "download_progress": download_progress.get("progress", 0),
+                            "download_stage": download_progress.get("stage", "Loading..."),
+                            "download_status": download_progress.get("status", "unknown"),
+                            "downloaded_mb": download_progress.get("downloaded_mb", 0),
+                            "total_mb": download_progress.get("total_mb", 0),
+                            "download_speed_mbps": download_progress.get("speed_mbps", 0),
+                            "download_eta_seconds": download_progress.get("eta_seconds", 0)
+                        })
+                finally:
+                    db.close()
+
+            return result
 
     def refresh_settings(self):
         """Refresh settings from database (called when settings change)."""

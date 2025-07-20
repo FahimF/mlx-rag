@@ -31,8 +31,23 @@
         }
         .status-loaded { background-color: #10b981; }
         .status-unloaded { background-color: #6b7280; }
-        .status-loading { background-color: #f59e0b; animation: pulse 2s infinite; }
+        .status-loading {
+            background-color: #f59e0b;
+            animation: pulse 2s infinite;
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+        }
         .status-failed { background-color: #ef4444; }
+        .status-downloading {
+            background-color: #3b82f6;
+            animation: bounce 1s infinite;
+        }
+        @keyframes bounce {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+        }
+        .progress-glow {
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+        }
     </style>
 </head>
 <body class="gradient-bg min-h-screen">
@@ -140,6 +155,9 @@
                     <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="monitor">
                         <i class="fas fa-chart-line mr-2"></i>Monitor
                     </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="api-test">
+                        <i class="fas fa-code mr-2"></i>API Test
+                    </button>
                     <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="settings">
                         <i class="fas fa-cog mr-2"></i>Settings
                     </button>
@@ -179,6 +197,9 @@
                     <!-- Category buttons -->
                     <div class="mb-6">
                         <div class="flex flex-wrap gap-2">
+                            <button onclick="loadTrendingModels()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm" style="background-color: #dc2626 !important;">
+                                <i class="fas fa-fire mr-1"></i>Trending
+                            </button>
                             <button onclick="loadPopularChat()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">
                                 <i class="fas fa-comments mr-1"></i>Text
                             </button>
@@ -221,6 +242,107 @@
                             <h3 class="text-lg font-bold text-white mb-4">Model Statistics</h3>
                             <div id="model-stats" class="space-y-3 text-sm text-gray-300">
                                 <!-- Model stats will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API Test Tab -->
+                <div id="api-test-tab" class="tab-content hidden">
+                    <h2 class="text-xl font-bold text-white mb-6">API Test Console</h2>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Input Panel -->
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">Test Configuration</h3>
+                            
+                            <!-- Model Selection -->
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-300 mb-2">Select Model</label>
+                                <select id="test-model-select" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-400 focus:outline-none">
+                                    <option value="">Loading models...</option>
+                                </select>
+                            </div>
+
+                            <!-- Message Input -->
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-300 mb-2">Message</label>
+                                <textarea id="test-message" rows="4" 
+                                    placeholder="Enter your test message here..."
+                                    class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-400 focus:outline-none resize-none"></textarea>
+                            </div>
+
+                            <!-- Advanced Options -->
+                            <div class="mb-4">
+                                <button onclick="toggleAdvancedOptions()" class="text-blue-400 hover:text-blue-300 text-sm">
+                                    <i class="fas fa-chevron-right mr-1" id="advanced-chevron"></i>Advanced Options
+                                </button>
+                                <div id="advanced-options" class="hidden mt-3 space-y-3">
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label class="block text-xs text-gray-400 mb-1">Max Tokens</label>
+                                            <input type="number" id="test-max-tokens" value="512" min="1" max="4096"
+                                                class="w-full px-2 py-1 bg-gray-700 text-white rounded border border-gray-600 text-sm">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-400 mb-1">Temperature</label>
+                                            <input type="number" id="test-temperature" value="0.7" min="0" max="2" step="0.1"
+                                                class="w-full px-2 py-1 bg-gray-700 text-white rounded border border-gray-600 text-sm">
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-gray-400 mb-1">System Message (optional)</label>
+                                        <textarea id="test-system-message" rows="2" 
+                                            placeholder="You are a helpful assistant..."
+                                            class="w-full px-2 py-1 bg-gray-700 text-white rounded border border-gray-600 text-sm resize-none"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Test Button -->
+                            <button onclick="testApiCall()" id="test-api-button" 
+                                class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-medium">
+                                <i class="fas fa-play mr-2"></i>Send Test Request
+                            </button>
+                        </div>
+
+                        <!-- Response Panel -->
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-lg font-bold text-white">Response</h3>
+                                <button onclick="clearTestResults()" class="text-gray-400 hover:text-white text-sm">
+                                    <i class="fas fa-trash mr-1"></i>Clear
+                                </button>
+                            </div>
+                            
+                            <!-- Response Display -->
+                            <div id="test-response" class="bg-gray-900 rounded p-4 min-h-[300px] max-h-[500px] overflow-y-auto">
+                                <div class="text-gray-500 text-center py-8">
+                                    <i class="fas fa-comment-dots text-3xl mb-2"></i>
+                                    <p>Response will appear here</p>
+                                </div>
+                            </div>
+
+                            <!-- Response Stats -->
+                            <div id="test-stats" class="hidden mt-4 text-xs text-gray-400 space-y-1">
+                                <div>Response Time: <span id="response-time">-</span>ms</div>
+                                <div>Tokens Generated: <span id="tokens-generated">-</span></div>
+                                <div>Model: <span id="response-model">-</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Request History -->
+                    <div class="mt-6 bg-gray-800 rounded-lg p-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold text-white">Request History</h3>
+                            <button onclick="clearTestHistory()" class="text-gray-400 hover:text-white text-sm">
+                                <i class="fas fa-history mr-1"></i>Clear History
+                            </button>
+                        </div>
+                        <div id="test-history" class="space-y-2 max-h-[200px] overflow-y-auto">
+                            <div class="text-gray-500 text-center py-4">
+                                <p class="text-sm">No tests run yet</p>
                             </div>
                         </div>
                     </div>
@@ -314,11 +436,24 @@
         </p>
     </footer>
 
-    <!-- Loading Modal -->
+    <!-- Enhanced Loading Modal with Progress -->
     <div id="loading-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
-        <div class="glass rounded-lg p-8 text-center">
-            <i class="fas fa-spinner fa-spin text-4xl text-blue-400 mb-4"></i>
-            <p class="text-white text-lg" id="loading-text">Loading...</p>
+        <div class="glass rounded-lg p-8 text-center max-w-md w-full mx-4">
+            <i class="fas fa-spinner fa-spin text-4xl text-blue-400 mb-4" id="loading-icon"></i>
+            <p class="text-white text-lg mb-2" id="loading-text">Loading...</p>
+            <div id="loading-details" class="text-gray-300 text-sm mb-4 hidden">
+                <div class="flex justify-between mb-1">
+                    <span id="loading-stage">Initializing...</span>
+                    <span id="loading-time">0s</span>
+                </div>
+                <div class="w-full bg-gray-700 rounded-full h-2 mb-2">
+                    <div id="loading-progress" class="bg-blue-600 h-2 rounded-full transition-all duration-300 progress-glow" style="width: 0%"></div>
+                </div>
+                <div id="loading-status" class="text-xs text-gray-400"></div>
+            </div>
+            <button id="cancel-loading" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm hidden">
+                <i class="fas fa-times mr-1"></i>Cancel
+            </button>
         </div>
     </div>
 
@@ -355,6 +490,8 @@
         // Global state
         let currentModels = [];
         let systemStatus = {};
+        let progressPollingInterval = null;
+        let loadingStartTime = null;
 
         // Tab switching
         document.querySelectorAll('.tab-button').forEach(button => {
@@ -385,19 +522,60 @@
                 refreshModels();
             } else if (tabName === 'monitor') {
                 loadSystemInfo();
+            } else if (tabName === 'api-test') {
+                loadTestModels();
             } else if (tabName === 'settings') {
                 loadSettings();
             }
         }
 
-        // Utility functions
-        function showLoading(text = 'Loading...') {
+        // Enhanced progress tracking functions
+        function showProgressModal(text = 'Loading...', showProgress = false) {
             document.getElementById('loading-text').textContent = text;
             document.getElementById('loading-modal').classList.remove('hidden');
+
+            if (showProgress) {
+                document.getElementById('loading-details').classList.remove('hidden');
+                document.getElementById('loading-stage').textContent = 'Preparing...';
+                document.getElementById('loading-time').textContent = '0s';
+                document.getElementById('loading-progress').style.width = '0%';
+                document.getElementById('loading-status').textContent = '';
+                loadingStartTime = Date.now();
+            } else {
+                document.getElementById('loading-details').classList.add('hidden');
+            }
+        }
+
+        function hideProgressModal() {
+            document.getElementById('loading-modal').classList.add('hidden');
+            document.getElementById('loading-details').classList.add('hidden');
+            if (progressPollingInterval) {
+                clearInterval(progressPollingInterval);
+                progressPollingInterval = null;
+            }
+            loadingStartTime = null;
+        }
+
+        function updateProgress(stage, progress, status, elapsed) {
+            document.getElementById('loading-stage').textContent = stage;
+            document.getElementById('loading-progress').style.width = `${progress}%`;
+            document.getElementById('loading-status').textContent = status;
+
+            if (elapsed !== undefined) {
+                document.getElementById('loading-time').textContent = `${elapsed}s`;
+            } else if (loadingStartTime) {
+                const elapsedSeconds = Math.floor((Date.now() - loadingStartTime) / 1000);
+                document.getElementById('loading-time').textContent = `${elapsedSeconds}s`;
+            }
+        }
+
+        // Legacy functions for compatibility
+        function showLoading(text = 'Loading...') {
+            showProgressModal(text, false);
         }
 
         function hideLoading() {
-            document.getElementById('loading-modal').classList.add('hidden');
+            hideProgressModal();
         }
 
         function showToast(message, type = 'success') {
@@ -431,6 +609,7 @@
             switch (status) {
                 case 'loaded': return 'status-loaded';
                 case 'loading': return 'status-loading';
+                case 'downloading': return 'status-downloading';
                 case 'failed': return 'status-failed';
                 default: return 'status-unloaded';
             }
@@ -550,16 +729,28 @@
         }
 
         // Model management functions
-        async function refreshModels() {
+        async function refreshModels(silent = false) {
             try {
-                showLoading('Loading models...');
+                if (!silent) {
+                    showLoading('Loading models...');
+                }
                 const response = await apiCall('/v1/manager/models');
                 currentModels = response.models || [];
                 renderModels();
+
+                // Auto-refresh if any models are in loading state
+                const hasLoadingModels = currentModels.some(m => m.status === 'loading' || m.status === 'downloading');
+                if (hasLoadingModels && !progressPollingInterval) {
+                    setTimeout(() => refreshModels(true), 3000); // Refresh again in 3 seconds
+                }
             } catch (error) {
-                showToast('Failed to load models', 'error');
+                if (!silent) {
+                    showToast('Failed to load models', 'error');
+                }
             } finally {
-                hideLoading();
+                if (!silent) {
+                    hideLoading();
+                }
             }
         }
 
@@ -582,7 +773,9 @@
                     <div class="flex items-center justify-between">
                         <div class="flex-1">
                             <div class="flex items-center mb-2">
-                                <span class="status-indicator ${getStatusClass(model.status)}"></span>
+                                <span class="status-indicator ${getStatusClass(model.status)}"
+                                      ${model.status === 'loading' ? 'title="Model is currently loading..."' : ''}
+                                      ${model.status === 'downloading' ? 'title="Model is downloading from HuggingFace..."' : ''}></span>
                                 <h3 class="text-lg font-medium text-white">
                                     ${model.huggingface_id ?
                                         `<a href="https://huggingface.co/${model.huggingface_id}" target="_blank" rel="noopener noreferrer"
@@ -625,16 +818,121 @@
 
         async function loadModel(modelName) {
             try {
-                showLoading(`Loading ${modelName}...`);
-                await apiCall(`/v1/models/${modelName}/load`, { method: 'POST' });
+                // Show enhanced progress modal
+                showProgressModal(`Loading ${modelName}...`, true);
+                updateProgress('Initializing...', 5, 'Starting model loading process');
+
+                // Start the loading request (non-blocking)
+                const loadPromise = apiCall(`/v1/models/${modelName}/load`, { method: 'POST' });
+
+                // Start progress polling
+                await pollModelLoadingProgress(modelName, loadPromise);
+
                 showToast(`Model ${modelName} loaded successfully`);
                 refreshModels();
                 updateDashboard();
             } catch (error) {
                 showToast(`Failed to load ${modelName}`, 'error');
             } finally {
-                hideLoading();
+                hideProgressModal();
             }
+        }
+
+        async function pollModelLoadingProgress(modelName, loadPromise) {
+            return new Promise((resolve, reject) => {
+                let pollCount = 0;
+                let lastStatus = null;
+                let lastProgress = 0;
+
+                progressPollingInterval = setInterval(async () => {
+                    try {
+                        pollCount++;
+                        const elapsed = Math.floor((Date.now() - loadingStartTime) / 1000);
+
+                        // Check model status with real progress data
+                        const statusResponse = await apiCall(`/v1/manager/models/${modelName}/status`);
+                        const status = statusResponse.status;
+
+                        if (status !== lastStatus) {
+                            lastStatus = status;
+                            console.log(`Model ${modelName} status changed to: ${status}`);
+                        }
+
+                        // Update progress based on REAL server data
+                        if (status === 'loading') {
+                            // Use real download progress if available
+                            const realProgress = statusResponse.download_progress || 0;
+                            const downloadStage = statusResponse.download_stage || 'Loading...';
+                            const downloadStatus = statusResponse.download_status || 'unknown';
+                            const downloadedMB = statusResponse.downloaded_mb || 0;
+                            const totalMB = statusResponse.total_mb || 0;
+                            const speedMbps = statusResponse.download_speed_mbps || 0;
+                            const etaSeconds = statusResponse.download_eta_seconds || 0;
+
+                            // Build detailed status message
+                            let statusMessage = downloadStage;
+                            if (downloadedMB > 0 && totalMB > 0) {
+                                statusMessage = `Downloaded ${downloadedMB}MB/${totalMB}MB`;
+                                if (speedMbps > 0) {
+                                    statusMessage += ` (${speedMbps.toFixed(1)}MB/s)`;
+                                }
+                                if (etaSeconds > 0) {
+                                    const minutes = Math.floor(etaSeconds / 60);
+                                    const seconds = Math.floor(etaSeconds % 60);
+                                    statusMessage += ` - ETA: ${minutes}m ${seconds}s`;
+                                }
+                            } else if (elapsed > 0) {
+                                statusMessage += ` (${elapsed}s elapsed)`;
+                            }
+
+                            // Use real progress or fallback to minimal simulation
+                            const progress = realProgress > 0 ? realProgress : Math.min(pollCount * 0.5, 5);
+
+                            // Only update if progress actually changed (avoid fake updates)
+                            if (Math.abs(progress - lastProgress) > 0.1 || downloadStage !== lastStatus) {
+                                updateProgress(downloadStage, progress, statusMessage, elapsed);
+                                lastProgress = progress;
+                            }
+
+                        } else if (status === 'loaded') {
+                            updateProgress('Completed!', 100, 'Model loaded successfully', elapsed);
+                            clearInterval(progressPollingInterval);
+                            progressPollingInterval = null;
+                            resolve();
+                            return;
+                        } else if (status === 'failed') {
+                            clearInterval(progressPollingInterval);
+                            progressPollingInterval = null;
+                            reject(new Error('Model loading failed'));
+                            return;
+                        }
+
+                        // Check if the main loading promise completed
+                        if (loadPromise && loadPromise.then) {
+                            loadPromise.then(() => {
+                                updateProgress('Completed!', 100, 'Model loaded successfully');
+                                clearInterval(progressPollingInterval);
+                                progressPollingInterval = null;
+                                resolve();
+                            }).catch((error) => {
+                                clearInterval(progressPollingInterval);
+                                progressPollingInterval = null;
+                                reject(error);
+                            });
+                            loadPromise = null; // Prevent multiple handlers
+                        }
+
+                    } catch (error) {
+                        console.warn('Progress polling error:', error);
+                        // Continue polling unless it's a critical error
+                        if (pollCount > 300) { // 5 minutes timeout (more realistic for large downloads)
+                            clearInterval(progressPollingInterval);
+                            progressPollingInterval = null;
+                            reject(new Error('Loading timeout - please check server logs for details'));
+                        }
+                    }
+                }, 1000); // Poll every second
+            });
         }
 
         async function unloadModel(modelName) {
@@ -779,6 +1077,18 @@
             }
         }
 
+        async function loadTrendingModels() {
+            try {
+                showLoading('Loading trending models...');
+                const response = await apiCall('/v1/discover/trending?limit=20');
+                renderDiscoveryResults(response.models || []);
+            } catch (error) {
+                showToast('Failed to load trending models', 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
         async function loadEmbeddingModels() {
             try {
                 showLoading('Loading embedding models...');
@@ -839,22 +1149,59 @@
 
         async function installModel(modelId, modelName) {
             try {
-                showLoading(`Installing ${modelName}...`);
+                // Show enhanced progress modal for installation
+                showProgressModal(`Installing ${modelName}...`, true);
+                updateProgress('Preparing installation...', 5, 'Validating model information');
+
                 const sanitizedName = modelName.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-                await apiCall('/v1/models/install', {
+
+                // Start installation
+                updateProgress('Downloading model files...', 15, 'Contacting HuggingFace repository');
+
+                const installPromise = apiCall('/v1/models/install', {
                     method: 'POST',
                     body: JSON.stringify({
                         model_id: modelId,
                         name: sanitizedName
                     })
                 });
+
+                // Simulate installation progress
+                const progressSteps = [
+                    { progress: 25, stage: 'Downloading model files...', status: 'Fetching model configuration' },
+                    { progress: 45, stage: 'Downloading model files...', status: 'Downloading model weights' },
+                    { progress: 70, stage: 'Processing files...', status: 'Validating downloaded files' },
+                    { progress: 85, stage: 'Installing model...', status: 'Setting up model in database' },
+                    { progress: 95, stage: 'Finalizing...', status: 'Completing installation' }
+                ];
+
+                let stepIndex = 0;
+                const progressInterval = setInterval(() => {
+                    if (stepIndex < progressSteps.length) {
+                        const step = progressSteps[stepIndex];
+                        updateProgress(step.stage, step.progress, step.status);
+                        stepIndex++;
+                    }
+                }, 2000); // Update every 2 seconds
+
+                // Wait for installation to complete
+                await installPromise;
+
+                clearInterval(progressInterval);
+                updateProgress('Installation complete!', 100, 'Model installed successfully');
+
                 showToast(`Model ${modelName} installed successfully`);
                 // Switch to models tab and refresh
-                switchTab('models');
+                setTimeout(() => {
+                    switchTab('models');
+                }, 1000);
+
             } catch (error) {
                 showToast(`Failed to install ${modelName}`, 'error');
             } finally {
-                hideLoading();
+                setTimeout(() => {
+                    hideProgressModal();
+                }, 1500); // Brief delay to show completion
             }
         }
 
@@ -981,6 +1328,234 @@
             } finally {
                 hideLoading();
             }
+        }
+
+        // API Testing functions
+        let testHistory = [];
+
+        async function loadTestModels() {
+            try {
+                const response = await apiCall('/v1/manager/models');
+                const models = response.models || [];
+                const loadedModels = models.filter(m => m.status === 'loaded');
+                
+                const select = document.getElementById('test-model-select');
+                
+                if (loadedModels.length === 0) {
+                    select.innerHTML = '<option value="">No loaded models available</option>';
+                    return;
+                }
+                
+                select.innerHTML = loadedModels.map(model => 
+                    `<option value="${model.name}">${model.name} (${model.type})</option>`
+                ).join('');
+                
+                // Select first model by default
+                if (loadedModels.length > 0) {
+                    select.value = loadedModels[0].name;
+                }
+            } catch (error) {
+                console.error('Failed to load test models:', error);
+                document.getElementById('test-model-select').innerHTML = '<option value="">Error loading models</option>';
+            }
+        }
+
+        function toggleAdvancedOptions() {
+            const options = document.getElementById('advanced-options');
+            const chevron = document.getElementById('advanced-chevron');
+            
+            if (options.classList.contains('hidden')) {
+                options.classList.remove('hidden');
+                chevron.classList.remove('fa-chevron-right');
+                chevron.classList.add('fa-chevron-down');
+            } else {
+                options.classList.add('hidden');
+                chevron.classList.remove('fa-chevron-down');
+                chevron.classList.add('fa-chevron-right');
+            }
+        }
+
+        async function testApiCall() {
+            const modelName = document.getElementById('test-model-select').value;
+            const message = document.getElementById('test-message').value;
+            const maxTokens = parseInt(document.getElementById('test-max-tokens').value);
+            const temperature = parseFloat(document.getElementById('test-temperature').value);
+            const systemMessage = document.getElementById('test-system-message').value;
+
+            if (!modelName) {
+                showToast('Please select a model', 'error');
+                return;
+            }
+
+            if (!message.trim()) {
+                showToast('Please enter a message', 'error');
+                return;
+            }
+
+            const button = document.getElementById('test-api-button');
+            const originalText = button.innerHTML;
+            
+            try {
+                // Update button state
+                button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Sending...';
+                button.disabled = true;
+
+                // Clear previous response
+                const responseDiv = document.getElementById('test-response');
+                responseDiv.innerHTML = `
+                    <div class="text-blue-400 text-center py-8">
+                        <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
+                        <p>Generating response...</p>
+                    </div>
+                `;
+
+                // Prepare request payload using OpenAI-compatible chat completions format
+                const messages = [];
+                if (systemMessage.trim()) {
+                    messages.push({
+                        role: 'system',
+                        content: systemMessage.trim()
+                    });
+                }
+                messages.push({
+                    role: 'user',
+                    content: message.trim()
+                });
+
+                const payload = {
+                    model: modelName,
+                    messages: messages,
+                    max_tokens: maxTokens,
+                    temperature: temperature,
+                    stream: false
+                };
+
+                // Record start time
+                const startTime = Date.now();
+
+                // Make API call using OpenAI-compatible endpoint
+                const response = await apiCall('/v1/chat/completions', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+
+                // Calculate response time
+                const responseTime = Date.now() - startTime;
+
+                // Display response
+                displayTestResponse(response, responseTime, modelName);
+
+                // Add to history
+                addToTestHistory(modelName, message, response, responseTime);
+
+                showToast('API test completed successfully');
+
+            } catch (error) {
+                // Display error
+                const responseDiv = document.getElementById('test-response');
+                responseDiv.innerHTML = `
+                    <div class="text-red-400 p-4">
+                        <div class="flex items-center mb-2">
+                            <i class="fas fa-exclamation-circle mr-2"></i>
+                            <strong>Error</strong>
+                        </div>
+                        <div class="text-sm text-gray-300">${error.message}</div>
+                    </div>
+                `;
+                showToast('API test failed', 'error');
+            } finally {
+                // Restore button
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+
+        function displayTestResponse(response, responseTime, modelName) {
+            const responseDiv = document.getElementById('test-response');
+            const statsDiv = document.getElementById('test-stats');
+
+            // Display the response text
+            const content = response.choices?.[0]?.message?.content || response.response || 'No response content';
+            
+            responseDiv.innerHTML = `
+                <div class="text-white whitespace-pre-wrap">${escapeHtml(content)}</div>
+            `;
+
+            // Update stats
+            document.getElementById('response-time').textContent = responseTime;
+            document.getElementById('tokens-generated').textContent = response.usage?.completion_tokens || '-';
+            document.getElementById('response-model').textContent = modelName;
+            statsDiv.classList.remove('hidden');
+        }
+
+        function addToTestHistory(modelName, message, response, responseTime) {
+            const historyItem = {
+                timestamp: new Date(),
+                modelName,
+                message: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
+                response: (response.choices?.[0]?.message?.content || response.response || '').substring(0, 100) + '...',
+                responseTime,
+                tokens: response.usage?.completion_tokens || 0
+            };
+
+            testHistory.unshift(historyItem);
+            if (testHistory.length > 10) {
+                testHistory = testHistory.slice(0, 10); // Keep only last 10
+            }
+
+            renderTestHistory();
+        }
+
+        function renderTestHistory() {
+            const historyDiv = document.getElementById('test-history');
+            
+            if (testHistory.length === 0) {
+                historyDiv.innerHTML = `
+                    <div class="text-gray-500 text-center py-4">
+                        <p class="text-sm">No tests run yet</p>
+                    </div>
+                `;
+                return;
+            }
+
+            historyDiv.innerHTML = testHistory.map(item => `
+                <div class="bg-gray-700 rounded p-3 text-sm">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-blue-400 font-medium">${item.modelName}</span>
+                        <span class="text-gray-400 text-xs">${item.timestamp.toLocaleTimeString()}</span>
+                    </div>
+                    <div class="text-gray-300 mb-1">Q: ${escapeHtml(item.message)}</div>
+                    <div class="text-gray-400 text-xs mb-1">A: ${escapeHtml(item.response)}</div>
+                    <div class="text-gray-500 text-xs">
+                        ${item.responseTime}ms • ${item.tokens} tokens
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function clearTestResults() {
+            const responseDiv = document.getElementById('test-response');
+            const statsDiv = document.getElementById('test-stats');
+            
+            responseDiv.innerHTML = `
+                <div class="text-gray-500 text-center py-8">
+                    <i class="fas fa-comment-dots text-3xl mb-2"></i>
+                    <p>Response will appear here</p>
+                </div>
+            `;
+            statsDiv.classList.add('hidden');
+        }
+
+        function clearTestHistory() {
+            testHistory = [];
+            renderTestHistory();
+            showToast('Test history cleared');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // Search on Enter

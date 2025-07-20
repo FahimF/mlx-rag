@@ -25,6 +25,42 @@
 
 ## 📦 Latest Release
 
+### v1.2.3 - Real-Time Model Status & Model Support (July 19 2025)
+
+🚀 **Real-Time Status Monitoring**
+- ✅ **Live Model Status** - Added real-time status tracking for model loading, including download progress.
+- 📊 **Detailed Status View** - See download percentage, speed, and ETA directly in the UI.
+- 🐛 **Fixed Status Endpoint** - Resolved a critical bug causing the server to crash when checking model status.
+- 🖼️ **See it in action:**
+  <img src="media/status.gif" width="600">
+
+🧪 **New API Test Console**
+- ✅ **Built-in API Testing** - Added dedicated API Test tab in the admin interface for single-turn testing
+- 🎯 **Model Selection** - Test any loaded model with customizable parameters (temperature, max tokens, system messages)
+- 📊 **Response Analytics** - View response time, token count, and detailed statistics
+- 📝 **Test History** - Keep track of recent API tests with timestamps and performance metrics
+- ⚡ **Quick Validation** - Perfect for testing model responses and API functionality
+🚀 **Comprehensive Model Ecosystem**
+- ✅ **15+ New Verified Models** - Added support for trending MLX models including SmolLM3, Kimi-K2, Gemma-3n, and more
+- 🧠 **Trillion-Parameter Support** - Added detection for ultra-large models like Kimi-K2-Instruct (1.02T parameters)
+- 🎯 **Enhanced Model Discovery** - Improved trending models endpoint with curated high-performance models
+- 🔍 **Smart Multimodal Detection** - Fixed classification for models like Gemma-3n to properly show as "Multimodal"
+
+🎨 **New Verified Tested Models**
+- **SmolLM3-3B-4bit** - Multilingual 481M parameter model with 8-language support
+- **Kimi-Dev-72B-4bit-DWQ** - Large reasoning model with advanced capabilities
+- **Kimi-K2-Instruct-4bit** - Ultra-large 1.02T parameter instruction-tuned model
+- **Llama-3.2-3B-Instruct-4bit** - Meta's instruction-following model with 502M parameters
+- **Gemma-2-9B-it-4bit** - Google's advanced reasoning model with 1.44B parameters
+- **Qwen3-30B-A3B-4bit-DWQ** - MoE model with 30B total/3B active parameters
+- **Gemma-3n-E4B-it-MLX-4bit** - Advanced multimodal model with image/audio/text capabilities
+
+🔧 **Technical Improvements**
+- 🎯 **Improved Model Type Classification** - Enhanced detection for multimodal models with image-text-to-text capabilities
+- 📊 **Expanded Parameter Patterns** - Added support for trillion-scale model memory estimation
+- 🧪 **Comprehensive Test Suite** - Added dedicated test scripts for all new models with streaming/non-streaming validation
+- 🔄 **Install-Load Workflow** - Updated all tests to follow proper MLX-GUI model lifecycle (install → load → use)
+
 ### v1.2.2 - Complete CyberAI Image Compatibility (July 15 2025)
 
 🔧 **Critical CyberAI Fix**
