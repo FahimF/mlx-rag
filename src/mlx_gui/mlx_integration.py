@@ -637,7 +637,7 @@ class MLXSentenceTransformerWrapper(MLXModelWrapper):
         try:
             from sentence_transformers import SentenceTransformer
             
-            # Map MLX community model paths to original Snowflake paths
+            # Map MLX community model paths to original paths
             model_path_mapping = {
                 'mlx-community/snowflake-arctic-embed-l-v2.0-4bit': 'Snowflake/snowflake-arctic-embed-l-v2.0',
                 'mlx-community/snowflake-arctic-embed-l-v2.0-bf16': 'Snowflake/snowflake-arctic-embed-l-v2.0',
@@ -645,19 +645,24 @@ class MLXSentenceTransformerWrapper(MLXModelWrapper):
                 'snowflake-arctic-embed-l-v2-0-bf16': 'Snowflake/snowflake-arctic-embed-l-v2.0',
                 'snowflake-arctic-embed-l-v2.0-4bit': 'Snowflake/snowflake-arctic-embed-l-v2.0',
                 'snowflake-arctic-embed-l-v2.0-bf16': 'Snowflake/snowflake-arctic-embed-l-v2.0',
+                # Add MiniLM mappings
+                'mlx-community/all-MiniLM-L6-v2-4bit': 'sentence-transformers/all-MiniLM-L6-v2',
+                'mlx-community/all-MiniLM-L6-v2-bf16': 'sentence-transformers/all-MiniLM-L6-v2',
+                'all-minilm-l6-v2-4bit': 'sentence-transformers/all-MiniLM-L6-v2',
+                'all-minilm-l6-v2-bf16': 'sentence-transformers/all-MiniLM-L6-v2',
             }
             
             # Use mapped path if available, otherwise use original
             actual_model_path = model_path_mapping.get(self.model_path, self.model_path)
-            logger.info(f"Loading Arctic model via sentence-transformers: {self.model_path} -> {actual_model_path}")
+            logger.info(f"Loading model via sentence-transformers: {self.model_path} -> {actual_model_path}")
             
             self.sentence_model = SentenceTransformer(actual_model_path)
-            logger.info(f"Successfully loaded Arctic model via sentence-transformers")
+            logger.info(f"Successfully loaded model via sentence-transformers")
         except ImportError:
-            raise RuntimeError("sentence-transformers library is required for Arctic models. Install with: pip install sentence-transformers")
+            raise RuntimeError("sentence-transformers library is required. Install with: pip install sentence-transformers")
         except Exception as e:
             logger.error(f"Failed to load model with sentence-transformers: {e}")
-            raise RuntimeError(f"Failed to load Arctic model with sentence-transformers: {e}")
+            raise RuntimeError(f"Failed to load model with sentence-transformers: {e}")
     
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings using sentence-transformers."""
@@ -1267,7 +1272,24 @@ class MLXLoader:
                         logger.info("Successfully loaded MiniLM embedding model via mlx_embeddings")
                     except Exception as e:
                         logger.error(f"Failed to load MiniLM embedding model: {e}")
-                        raise
+                        # Fallback to sentence-transformers for MiniLM if mlx_embeddings fails
+                        # This is especially important for PyInstaller bundles where BERT model type might not be properly registered
+                        if "model type bert not supported" in str(e).lower():
+                            logger.warning("BERT model type not supported in mlx_embeddings, trying sentence-transformers fallback")
+                            try:
+                                wrapper = MLXSentenceTransformerWrapper(model_path=model_path, config=config)
+                                logger.info("Successfully loaded MiniLM model via sentence-transformers fallback")
+                            except Exception as st_error:
+                                logger.error(f"Sentence-transformers fallback also failed: {st_error}")
+                                # Final fallback to universal wrapper
+                                try:
+                                    wrapper = MLXUniversalEmbeddingWrapper(model_path=model_path, config=config)
+                                    logger.info("Successfully loaded MiniLM model via universal wrapper fallback")
+                                except Exception as universal_error:
+                                    logger.error(f"All MiniLM loading methods failed: {universal_error}")
+                                    raise e
+                        else:
+                            raise e
                 
                 # 2. For BGE models, try mlx_embedding_models (most reliable)
                 elif "bge" in model_path.lower():

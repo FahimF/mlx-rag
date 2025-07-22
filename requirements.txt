@@ -83,6 +83,8 @@ mdurl==0.1.2
 misaki==0.9.4
 mlx==0.26.3
 mlx-audio==0.2.3
+mlx-embedding-models==0.0.3
+mlx-embeddings==0.0.7
 -e git+https://github.com/RamboRogers/mlx-gui.git@405256f54e66ef4a15f77e377afd45e50364a6a5#egg=mlx_gui
 mlx-lm==0.26.0
 mlx-vlm==0.3.1

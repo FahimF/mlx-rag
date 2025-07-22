@@ -19,7 +19,7 @@
 <img src="media/video.gif" >
 </div>
 
-**A lightweight Inference Server for Apple's MLX engine with a GUI.**
+**The Swiss Army Knife of Apple Silicon AI - A lightweight Inference Server for Apple's MLX engine with a GUI.**
 
 >*TLDR - OpenRouter-style v1 API interface for MLX with Ollama-like model management, featuring auto-queuing, on-demand model loading, and multi-user serving capabilities via single mac app.*
 
@@ -27,18 +27,29 @@
 
 ### 🎉 v1.2.4 - Universal AI Ecosystem (July 22 2025)
 
-#### 🚀 **NEW: Advanced Audio Intelligence**
-- 🎙️ **Enhanced Whisper Support** - Complete MLX-Whisper integration with Turbo, Large v3, and all model variants
-- 🎯 **Parakeet TDT Audio** - Ultra-fast speech-to-text with parakeet-tdt-0.6b-v2 model support
-- 📊 **Audio Streaming API** - Real-time transcription with OpenAI-compatible `/v1/audio/transcriptions` endpoint
-- 🔊 **Multi-Format Support** - Process WAV, MP3, M4A, and other audio formats seamlessly
+**From Whisper to Embeddings in One API** - 23 embedding models, 99 languages, complete audio/vision/text pipeline. Production-ready, not promises.
 
-#### 🧠 **NEW: Production-Ready Embeddings**
-- ⚡ **Multi-Architecture Support** - BGE, MiniLM, Qwen3, Arctic, and E5 embedding models
-- 🔄 **Universal Embedding Pipeline** - Automatic model detection and optimization for each architecture
-- 📈 **Massive Scale Support** - From 384-dim MiniLM to 4096-dim Qwen3 embeddings
-- 🎯 **OpenAI-Compatible API** - Drop-in replacement with `/v1/embeddings` endpoint
-- 🔢 **Normalized Vectors** - Ready for similarity search and RAG applications
+<div align="center">
+<img src="media/audio.gif" width="500">
+</div>
+
+#### 🚀 **NEW: Advanced Audio Intelligence**
+- 🎙️ **Complete Whisper Ecosystem** - All variants (Tiny to Large v3) with automatic fallback - never fails!
+- 🌍 **99+ Languages** - Auto-detection with no configuration needed
+- ⏱️ **Word-Level Timestamps** - Perfect for subtitles, content indexing, and meeting analysis
+- 📼 **Universal Format Support** - WAV, MP3, MP4, M4A, FLAC, OGG, WebM - any audio format works
+- 🎯 **Parakeet TDT** - Lightning-fast transcription for real-time applications
+- 🎨 **Beautiful Audio UI** - Drag-and-drop interface with 11 languages and 5 output formats
+
+
+
+#### 🧠 **NEW: Complete Embedding Ecosystem**
+- 🌟 **23+ Models, 13 Families** - E5, ModernBERT, Arctic, GTE, BGE, MiniLM, Qwen3, SentenceT5, Jina AI, and more!
+- 🔧 **Triple Library Support** - Seamlessly integrates mlx_embedding_models, mlx_embeddings, AND sentence-transformers
+- 🧪 **Battle-Tested** - 553 lines of embedding tests + 338 lines of audio tests ensure reliability
+- 📏 **Any Dimension** - From efficient 384-dim to powerful 4096-dim embeddings
+- 🎯 **Smart Architecture Detection** - Automatically optimizes extraction for each model type
+- 🔢 **L2-Normalized Vectors** - Production-ready for similarity search and RAG applications
 
 #### 🤖 **NEW: Mistral Small Integration**
 - ✨ **24B Parameter Model** - Full support for Mistral-Small-3.2-24B-Instruct
@@ -47,10 +58,12 @@
 - 🔧 **Smart Classification** - Automatic detection and proper model type assignment
 
 #### 🛠️ **Technical Excellence**
-- 🎯 **Pipeline Reliability** - Fixed model mapping issues and test inconsistencies
+- 🧪 **900+ Lines of Tests** - Comprehensive test coverage for production reliability
+- 🔍 **New Discovery Endpoint** - `/v1/discover/stt` for easy speech-to-text model discovery
+- 🎯 **Never-Fail Architecture** - Smart Whisper fallback ensures audio transcription always works
 - 📊 **Enhanced Memory Management** - Optimized loading for large embedding and audio models
-- 🔍 **Robust Error Handling** - Better fallback mechanisms and debugging capabilities
-- ⚡ **Performance Optimization** - Faster model switching and queue processing
+- 🔄 **Intelligent Queue System** - Handles diverse result types (lists, arrays, dicts) seamlessly
+- ⚡ **Performance Optimization** - Faster model switching and concurrent processing
 
 ---
 

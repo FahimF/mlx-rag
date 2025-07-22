@@ -42,6 +42,7 @@ dependencies = [
     "mlx-audio>=0.1.0",
     "mlx-vlm>=0.1.0",
     "mlx_embedding_models>=0.0.3",
+    "mlx_embeddings>=0.0.7",
 ]
 
 [project.optional-dependencies]
