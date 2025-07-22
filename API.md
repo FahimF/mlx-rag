@@ -649,29 +649,51 @@ Update a specific setting.
 ### Audio Transcription
 
 #### `POST /v1/audio/transcriptions`
-OpenAI-compatible audio transcription endpoint supporting Whisper and Parakeet models.
+OpenAI-compatible audio transcription endpoint using MLX-optimized Whisper models for high-performance speech-to-text on Apple Silicon.
 
 **Request (multipart/form-data):**
-- `file` (required): Audio file (wav, mp3, m4a, flac, etc.)
+- `file` (required): Audio file (wav, mp3, m4a, flac, ogg, webm)
 - `model` (required): Model to use for transcription
-- `language` (optional): Language of the audio (ISO-639-1 format)
+- `language` (optional): Language of the audio (ISO-639-1 format, e.g., 'en', 'es', 'fr')
 - `prompt` (optional): Initial prompt to guide transcription
-- `response_format` (optional): Format of response (`json`, `text`, `verbose_json`, `srt`, `vtt`)
+- `response_format` (optional): Format of response (`json`, `text`, `verbose_json`)
 - `temperature` (optional): Sampling temperature (0.0 to 1.0)
+- `word_timestamps` (optional): Include word-level timestamps (default: false)
 
 **Supported Models:**
-- `whisper-1` → `whisper-small-mlx` (alias for OpenAI compatibility)
-- `whisper-small`, `whisper-medium`, `whisper-large` → MLX Whisper variants
-- `parakeet-tdt-0-6b-v2` → MLX-Community Parakeet model
-- Any installed MLX audio model
+| Model Name | MLX Model | Size | Memory | Speed | Accuracy |
+|------------|-----------|------|--------|-------|----------|
+| `whisper-1` | `mlx-community/whisper-tiny` | ~39MB | Low | Fastest | Good |
+| `whisper-tiny` | `mlx-community/whisper-tiny` | ~39MB | Low | Fastest | Good |
+| `whisper-base` | `mlx-community/whisper-base` | ~74MB | Low | Fast | Better |
+| `whisper-small` | `mlx-community/whisper-small` | ~244MB | Medium | Medium | Good |
+| `whisper-medium` | `mlx-community/whisper-medium` | ~769MB | High | Slower | Very Good |
+| `whisper-large` | `mlx-community/whisper-large-v3` | ~1.5GB | Very High | Slowest | Best |
+| `whisper-large-v2` | `mlx-community/whisper-large-v2` | ~1.5GB | Very High | Slowest | Excellent |
+| `whisper-large-v3` | `mlx-community/whisper-large-v3` | ~1.5GB | Very High | Slowest | Best |
 
-**Example Request:**
+**Supported Audio Formats:**
+- **WAV** - Uncompressed audio (recommended)
+- **MP3** - Compressed audio  
+- **MP4/M4A** - MPEG-4 audio
+- **FLAC** - Lossless compression
+- **OGG** - Ogg Vorbis
+- **WebM** - Web audio format
+
+**Basic Example:**
 ```bash
 curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
-  -H "Content-Type: multipart/form-data" \
   -F "file=@audio.wav" \
-  -F "model=parakeet-tdt-0-6b-v2" \
-  -F "response_format=json"
+  -F "model=whisper-small"
+```
+
+**With Language Specification:**
+```bash
+curl -X POST "http://localhost:8000/v1/audio/transcriptions" \
+  -F "file=@audio.mp3" \
+  -F "model=whisper-medium" \
+  -F "language=es" \
+  -F "response_format=verbose_json"
 ```
 
 **Response (JSON format):**
@@ -690,6 +712,7 @@ Hello, this is a test of the audio transcription system.
 ```json
 {
   "text": "Hello, this is a test of the audio transcription system.",
+  "language": "en",
   "segments": [
     {
       "id": 0,
@@ -697,35 +720,73 @@ Hello, this is a test of the audio transcription system.
       "end": 3.5,
       "text": "Hello, this is a test of the audio transcription system."
     }
-  ]
+  ],
+  "model": "whisper-small"
 }
 ```
 
+**Python Client Example:**
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="any-key",  # MLX-GUI accepts any key
+    base_url="http://localhost:8000/v1"
+)
+
+with open("audio.wav", "rb") as audio_file:
+    transcript = client.audio.transcriptions.create(
+        model="whisper-small",
+        file=audio_file,
+        language="en"  # Optional
+    )
+
+print(transcript.text)
+```
+
 **Audio Model Installation:**
-Before using audio transcription, install the required models:
+Install Whisper models before first use:
 
 ```bash
-# Install Parakeet model (recommended)
+# Install recommended model
 curl -X POST http://localhost:8000/v1/models/install \
   -H "Content-Type: application/json" \
   -d '{
-    "model_id": "mlx-community/parakeet-tdt-0.6b-v2",
-    "name": "parakeet-tdt-0-6b-v2"
+    "model_id": "mlx-community/whisper-small",
+    "name": "whisper-small"
   }'
 
-# Install Whisper model
+# Install tiny model for fast transcription
 curl -X POST http://localhost:8000/v1/models/install \
   -H "Content-Type: application/json" \
   -d '{
-    "model_id": "mlx-community/whisper-small-mlx",
-    "name": "whisper-small-mlx"
+    "model_id": "mlx-community/whisper-tiny", 
+    "name": "whisper-tiny"
+  }'
+
+# Install large model for best accuracy
+curl -X POST http://localhost:8000/v1/models/install \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_id": "mlx-community/whisper-large-v3",
+    "name": "whisper-large-v3"
   }'
 ```
 
+**Performance Guidelines:**
+- **Quick transcription**: Use `whisper-tiny` or `whisper-base`
+- **Balanced performance**: Use `whisper-small` (recommended default)
+- **High accuracy**: Use `whisper-medium` or `whisper-large-v3`
+- **Resource constrained**: Start with `whisper-tiny`
+
+**Auto-Loading:** Models automatically load when needed and unload based on memory management policies.
+
 **Error Responses:**
-- `400`: Invalid audio file or model not loaded
-- `404`: Audio model not found
-- `500`: Transcription failed
+- `400`: Invalid audio file, unsupported format, or model not compatible
+- `404`: Audio model not found - install it first
+- `500`: Transcription failed or model loading error
+
+**Memory Management:** Audio models use GPU memory on Apple Silicon and are subject to the same auto-unloading policies as text models.
 
 ### Audio Speech (Text-to-Speech)
 

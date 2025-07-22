@@ -29,18 +29,25 @@ TEST_MODELS = {
     "text": {
         "qwen3": "qwen3-8b-6bit",
         "deepseek": "deepseek-r1-0528-qwen3-8b-mlx-8bit",  # DeepSeek R1 based on Qwen3
-        "smollm3": "smollm3-3b-4bit"  # SmolLM3 multilingual model
+        "smollm3": "smollm3-3b-4bit",  # SmolLM3 multilingual model
+        "mistral_small": "mistral-small-3-2-24b-instruct-2506-mlx-4bit"  # Mistral Small 24B instruct model
     },
     "audio": {
-        "parakeet": "parakeet-tdt-0-6b-v2"
+        "parakeet": "parakeet-tdt-0-6b-v2",
+        "whisper_turbo": "whisper-large-v3-turbo"
     },
     "vision": {
         "gemma3_text": "gemma-3-27b-it-qat-4bit",  # Gemma 3 text model via MLX-VLM
         "gemma3n_8bit": "gemma-3n-e4b-it-mlx-8bit",  # Gemma 3n vision model (8bit)
         "gemma3n_4bit": "gemma-3n-e4b-it",  # Gemma 3n vision model (4bit)
+        "synthia": "synthia-s1-27b-mlx-8bit",  # Synthia multimodal model
+        "mistral_small": "mistral-small-3-2-24b-instruct-2506-mlx-4bit"  # Mistral Small 24B instruct model
     },
     "embedding": {
-        "qwen3_embedding": "Qwen3-Embedding-4B-4bit-DWQ"  # Qwen3 embedding model
+        "qwen3_embedding": "qwen3-embedding-4b-4bit-dwq",  # Qwen3 embedding model
+        "bge_small": "bge-small-en-v1-5-bf16",  # BGE embedding model
+        "minilm": "all-minilm-l6-v2-4bit",  # MiniLM embedding model
+        "e5_large": "multilingual-e5-large-mlx"  # E5 large multilingual embedding model
     }
 }
 
@@ -153,9 +160,9 @@ class MLXTestSuite:
                         model_id_lower = model_id.lower()
                         if any(keyword in model_id_lower for keyword in ["parakeet", "whisper", "speech", "tdt"]):
                             model_type = "audio"
-                        elif any(keyword in model_id_lower for keyword in ["3n", "vlm", "vision", "vl-", "multimodal", "qwen2-vl", "gemma-3", "gemma3"]):
+                        elif any(keyword in model_id_lower for keyword in ["3n", "vlm", "vision", "vl-", "multimodal", "qwen2-vl", "gemma-3", "gemma3", "mistral-small"]):
                             model_type = "vision"
-                        elif any(keyword in model_id_lower for keyword in ["embedding", "qwen3-embedding"]):
+                        elif any(keyword in model_id_lower for keyword in ["embedding", "qwen3-embedding", "bge", "minilm"]):
                             model_type = "embedding"
                         else:
                             model_type = "text"  # Default to text for most LLMs
@@ -244,10 +251,10 @@ class MLXTestSuite:
 
     async def test_audio_transcription(self, model_name: str) -> bool:
         """Test audio transcription with Parakeet model."""
-        print(f"\n🎙️  Testing Audio Transcription - {model_name}")
+        print(f"\n🎙️  Testing Audio Transcription (Parakeet) - {model_name}")
 
         if not model_name:
-            self.add_result(TestResult("Audio Transcription", False, "Parakeet model not configured"))
+            self.add_result(TestResult("Audio Transcription (Parakeet)", False, "Parakeet model not configured"))
             return False
 
         try:
@@ -257,7 +264,7 @@ class MLXTestSuite:
                 # Try alternative path if running from different directory
                 test_wav_path = os.path.join("tests", "test.wav")
                 if not os.path.exists(test_wav_path):
-                    self.add_result(TestResult("Audio Transcription", False, f"test.wav file not found at {test_wav_path}"))
+                    self.add_result(TestResult("Audio Transcription (Parakeet)", False, f"test.wav file not found at {test_wav_path}"))
                     return False
 
             # Test transcription
@@ -280,9 +287,9 @@ class MLXTestSuite:
                 print(f"    📝 Transcribed text from audio: '{text}'")
 
                 self.add_result(TestResult(
-                    "Audio Transcription",
+                    "Audio Transcription (Parakeet)",
                     True,
-                    f"✅ Transcribed audio to text: '{text}' (Queue + usage counting working)"
+                    f"✅ Transcribed audio to text: '{text}' (Parakeet working)"
                 ))
 
                 # Unload model after successful test
@@ -296,11 +303,101 @@ class MLXTestSuite:
                 except:
                     error_detail = f"HTTP {response.status_code}"
 
-                self.add_result(TestResult("Audio Transcription", False, error_detail))
+                self.add_result(TestResult("Audio Transcription (Parakeet)", False, error_detail))
                 return False
 
         except Exception as e:
-            self.add_result(TestResult("Audio Transcription", False, f"Test failed: {e}"))
+            self.add_result(TestResult("Audio Transcription (Parakeet)", False, f"Test failed: {e}"))
+            return False
+
+    async def test_whisper_transcription(self, model_name: str, model_label: str) -> bool:
+        """Test audio transcription with MLX Whisper models."""
+        print(f"\n🔊 Testing Whisper Transcription - {model_label} ({model_name})")
+
+        if not model_name:
+            self.add_result(TestResult(f"Whisper Transcription ({model_label})", False, "Whisper model not configured"))
+            return False
+
+        try:
+            # Use the existing test.wav file (relative to project root)
+            test_wav_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tests", "test.wav")
+            if not os.path.exists(test_wav_path):
+                # Try alternative path if running from different directory
+                test_wav_path = os.path.join("tests", "test.wav")
+                if not os.path.exists(test_wav_path):
+                    self.add_result(TestResult(f"Whisper Transcription ({model_label})", False, f"test.wav file not found at {test_wav_path}"))
+                    return False
+
+            # Test transcription with different parameters
+            print(f"  🔄 Transcribing test.wav with {model_label}...")
+            with open(test_wav_path, 'rb') as audio_file:
+                files = {'file': ('test.wav', audio_file, 'audio/wav')}
+                data = {
+                    'model': model_name,
+                    'response_format': 'json',
+                    'language': 'en',  # Specify English for better accuracy
+                    'timestamp_granularities': ['word']  # Request word-level timestamps
+                }
+
+                response = await self.client.post(
+                    f"{BASE_URL}/v1/audio/transcriptions",
+                    files=files,
+                    data=data
+                )
+
+            if response.status_code == 200:
+                result = response.json()
+                text = result.get('text', '').strip()
+                language = result.get('language', 'unknown')
+
+                # Check for additional Whisper-specific features
+                segments = result.get('segments', [])
+                has_segments = len(segments) > 0
+
+                # Display the actual transcribed output from the audio file
+                print(f"    📝 Transcribed text: '{text}'")
+                print(f"    🌐 Detected language: {language}")
+                if has_segments:
+                    print(f"    ⏱️  Segments: {len(segments)} (timestamps working)")
+                    # Show first segment details if available
+                    if segments:
+                        first_segment = segments[0]
+                        start_time = first_segment.get('start', 'N/A')
+                        end_time = first_segment.get('end', 'N/A')
+                        segment_text = first_segment.get('text', 'N/A')
+                        print(f"    📍 First segment ({start_time}s-{end_time}s): '{segment_text}'")
+
+                # Create success message with Whisper-specific details
+                features = []
+                if has_segments:
+                    features.append("timestamps")
+                if language != 'unknown':
+                    features.append("language detection")
+
+                feature_str = f" ({', '.join(features)} working)" if features else ""
+
+                self.add_result(TestResult(
+                    f"Whisper Transcription ({model_label})",
+                    True,
+                    f"✅ MLX Whisper: '{text}' (lang: {language}){feature_str}"
+                ))
+
+                # Unload model after successful test
+                await self.unload_model(model_name)
+                return True
+            else:
+                error_detail = "Unknown error"
+                try:
+                    error_data = response.json()
+                    error_detail = error_data.get('detail', str(response.status_code))
+                except:
+                    error_detail = f"HTTP {response.status_code}"
+
+                self.add_result(TestResult(f"Whisper Transcription ({model_label})", False, error_detail))
+                return False
+
+        except Exception as e:
+            self.add_result(TestResult(f"Whisper Transcription ({model_label})", False, f"Test failed: {e}"))
             return False
 
     async def test_embedding_generation(self, model_name: str, model_label: str) -> bool:
@@ -443,8 +540,9 @@ class MLXTestSuite:
             img_url = f"data:image/png;base64,{img_base64}"
 
             # Test prompt varies by model type
-            if "gemma3_text" in model_label.lower() or ("gemma-3-27b" in model_name.lower() and "3n" not in model_name.lower()):
-                # This is a text-only Gemma 3 model being tested via MLX-VLM - test without image
+            if ("gemma3_text" in model_label.lower() or ("gemma-3-27b" in model_name.lower() and "3n" not in model_name.lower()) or 
+                "mistral" in model_name.lower()):
+                # This is a text-only model being tested via MLX-VLM - test without image
                 return await self._test_text_via_vision_model(model_name, model_label)
             elif "gemma3n" in model_name.lower():
                 prompt = "What color is this square? Answer with just the color name."
@@ -530,10 +628,16 @@ class MLXTestSuite:
                 message = result['choices'][0]['message']['content'].strip()
                 usage = result['usage']
 
+                # Determine the model type for the success message
+                if "mistral" in model_name.lower():
+                    model_info = " (Mistral via MLX-VLM)"
+                else:
+                    model_info = " (Gemma 3 via MLX-VLM)"
+                
                 self.add_result(TestResult(
                     f"Vision Gen ({model_label})",
                     True,
-                    f"Text via MLX-VLM: '{message}' ({usage['total_tokens']} tokens) (Gemma 3 via MLX-VLM)"
+                    f"Text via MLX-VLM: '{message}' ({usage['total_tokens']} tokens){model_info}"
                 ))
 
                 # Unload model after successful test
@@ -594,20 +698,46 @@ class MLXTestSuite:
         # Test audio transcription
         print("\n🎵 Audio Transcription Tests")
         print("-" * 30)
+
+        # Test Parakeet model
         audio_model = actual_test_models["audio"].get("parakeet")
         if audio_model:
             await self.test_audio_transcription(audio_model)
         else:
-            self.add_result(TestResult("Audio Transcription", False, "Parakeet model not available"))
+            self.add_result(TestResult("Audio Transcription (Parakeet)", False, "Parakeet model not available"))
+
+        # Test Whisper model
+        whisper_turbo = actual_test_models["audio"].get("whisper_turbo")
+
+        if whisper_turbo:
+            await self.test_whisper_transcription(whisper_turbo, "Whisper Large v3 Turbo")
+        else:
+            self.add_result(TestResult("Whisper Transcription (Turbo)", False, "Whisper Large v3 Turbo model not available"))
 
         # Test embedding generation
         print("\n🔗 Embedding Generation Tests")
         print("-" * 30)
-        embedding_model = actual_test_models["embedding"].get("qwen3_embedding")
-        if embedding_model:
-            await self.test_embedding_generation(embedding_model, "Qwen3 Embedding")
+        
+        # Test Qwen3 embedding model
+        qwen3_embedding = actual_test_models["embedding"].get("qwen3_embedding")
+        if qwen3_embedding:
+            await self.test_embedding_generation(qwen3_embedding, "Qwen3 Embedding")
         else:
-            self.add_result(TestResult("Embedding Generation", False, "Qwen3 embedding model not available"))
+            self.add_result(TestResult("Embedding Generation (Qwen3)", False, "Qwen3 embedding model not available"))
+        
+        # Test BGE embedding model
+        bge_embedding = actual_test_models["embedding"].get("bge_small")
+        if bge_embedding:
+            await self.test_embedding_generation(bge_embedding, "BGE Small")
+        else:
+            self.add_result(TestResult("Embedding Generation (BGE)", False, "BGE embedding model not available"))
+        
+        # Test MiniLM embedding model
+        minilm_embedding = actual_test_models["embedding"].get("minilm")
+        if minilm_embedding:
+            await self.test_embedding_generation(minilm_embedding, "MiniLM L6")
+        else:
+            self.add_result(TestResult("Embedding Generation (MiniLM)", False, "MiniLM embedding model not available"))
 
         # Test vision generation (Gemma 3n, Qwen2-VL)
         print("\n👁️  Vision Generation Tests")
@@ -645,14 +775,15 @@ class MLXTestSuite:
                 result["text"][key] = None
 
         # Audio models
-        parakeet_model = TEST_MODELS["audio"]["parakeet"]
-        if parakeet_model in available_models["audio"]:
-            result["audio"]["parakeet"] = parakeet_model
-        elif available_models["audio"]:
-            result["audio"]["parakeet"] = available_models["audio"][0]
-            print(f"  ℹ️  Using {available_models['audio'][0]} instead of {parakeet_model} for audio test")
-        else:
-            result["audio"]["parakeet"] = None
+        for key, preferred_name in TEST_MODELS["audio"].items():
+            if preferred_name in available_models["audio"]:
+                result["audio"][key] = preferred_name
+            elif available_models["audio"] and key == "parakeet":
+                # Use first available audio model for parakeet test
+                result["audio"][key] = available_models["audio"][0]
+                print(f"  ℹ️  Using {available_models['audio'][0]} instead of {preferred_name} for {key} test")
+            else:
+                result["audio"][key] = None
 
         # Vision models
         for key, preferred_name in TEST_MODELS["vision"].items():

@@ -1103,6 +1103,42 @@ def create_app() -> FastAPI:
                 detail="Error discovering vision models"
             )
 
+    @app.get("/v1/discover/stt")
+    async def discover_stt_models(query: str = "", limit: int = 10):
+        """Discover STT/speech-to-text models using HuggingFace pipeline filters."""
+        try:
+            hf_client = get_huggingface_client()
+            models = hf_client.search_stt_models(query=query, limit=limit)
+
+            return {
+                "models": [
+                    {
+                        "id": model.id,
+                        "name": model.name,
+                        "author": model.author,
+                        "downloads": model.downloads,
+                        "likes": model.likes,
+                        "model_type": model.model_type,
+                        "size_gb": model.size_gb,
+                        "estimated_memory_gb": model.estimated_memory_gb,
+                        "mlx_compatible": model.mlx_compatible,
+                        "has_mlx_version": model.has_mlx_version,
+                        "mlx_repo_id": model.mlx_repo_id,
+                        "tags": model.tags,
+                        "description": model.description,
+                        "updated_at": model.updated_at
+                    }
+                    for model in models
+                ],
+                "total": len(models)
+            }
+        except Exception as e:
+            logger.error(f"Error discovering STT models: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error discovering STT models"
+            )
+
     @app.get("/v1/discover/embeddings")
     async def discover_embedding_models(query: str = "", limit: int = 20):
         """Discover embedding models using HuggingFace pipeline filters."""
@@ -1551,12 +1587,20 @@ def create_app() -> FastAPI:
 
             # Map OpenAI model names to our audio models
             model_mapping = {
-                "whisper-1": "whisper-small-mlx",
-                "whisper-large": "whisper-large-mlx",
-                "whisper-small": "whisper-small-mlx",
-                "whisper-medium": "whisper-medium-mlx",
-                "whisper-tiny": "whisper-tiny-mlx",
-                "parakeet": "parakeet-tdt-0.6b-v2"
+                "whisper-1": "mlx-community/whisper-tiny",
+                "whisper-large": "mlx-community/whisper-large-v3",
+                "whisper-small": "mlx-community/whisper-small",
+                "whisper-medium": "mlx-community/whisper-medium",
+                "whisper-tiny": "mlx-community/whisper-tiny",
+                "whisper-base": "mlx-community/whisper-base",
+                "whisper-large-v2": "mlx-community/whisper-large-v2",
+                "whisper-large-v3": "mlx-community/whisper-large-v3",
+                "parakeet": "parakeet-tdt-0.6b-v2",
+                # Legacy mappings for backwards compatibility
+                "whisper-small-mlx": "mlx-community/whisper-small",
+                "whisper-large-mlx": "mlx-community/whisper-large-v3",
+                "whisper-medium-mlx": "mlx-community/whisper-medium",
+                "whisper-tiny-mlx": "mlx-community/whisper-tiny"
             }
 
             # Get actual model name
@@ -1574,6 +1618,8 @@ def create_app() -> FastAPI:
 
             # Check if model is loaded, auto-load if not
             loaded_model = model_manager.get_model_for_inference(actual_model_name)
+            use_direct_whisper = False
+            
             if not loaded_model:
                 logger.info(f"Audio model {actual_model_name} not loaded, attempting to load...")
                 success = await model_manager.load_model_async(
@@ -1581,22 +1627,22 @@ def create_app() -> FastAPI:
                     model_path=model_record.path,
                     priority=10  # High priority for audio requests
                 )
-                if not success:
+                if success:
+                    # Get the loaded model
+                    loaded_model = model_manager.get_model_for_inference(actual_model_name)
+                
+                # If loading failed or model still not available, try direct MLX-Whisper for Whisper models
+                if not loaded_model and model_record.model_type == 'whisper':
+                    logger.info(f"Using direct MLX-Whisper API for {actual_model_name}")
+                    use_direct_whisper = True
+                elif not loaded_model:
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                         detail=f"Failed to load audio model '{actual_model_name}'"
                     )
 
-                # Get the loaded model
-                loaded_model = model_manager.get_model_for_inference(actual_model_name)
-                if not loaded_model:
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail=f"Audio model '{actual_model_name}' failed to load properly"
-                    )
-
-            # Check if this is an audio model
-            if not hasattr(loaded_model.mlx_wrapper, 'transcribe_audio'):
+            # Check if this is an audio model (skip check for direct whisper usage)
+            if not use_direct_whisper and not hasattr(loaded_model.mlx_wrapper, 'transcribe_audio'):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Model '{actual_model_name}' is not an audio transcription model"
@@ -1610,18 +1656,37 @@ def create_app() -> FastAPI:
                 temp_file_path = temp_file.name
 
             try:
-                # Transcribe using queued audio processing
-                result = await queued_transcribe_audio(
-                    model_name=actual_model_name,
-                    file_path=temp_file_path,
-                    language=language,
-                    initial_prompt=prompt,
-                    temperature=temperature
-                )
-
-                # Extract text content from result
-                # Note: Usage counting is now handled in the queue manager
-                text_content = result.get("text", "")
+                if use_direct_whisper:
+                    # Use MLX-Whisper directly for maximum compatibility
+                    import mlx_whisper
+                    logger.info(f"Direct MLX-Whisper transcription for {actual_model_name}")
+                    
+                    result = mlx_whisper.transcribe(
+                        audio=temp_file_path,
+                        path_or_hf_repo=model_record.path,
+                        language=language,
+                        initial_prompt=prompt,
+                        temperature=temperature
+                    )
+                    
+                    # Update usage count manually for direct usage
+                    try:
+                        model_record.increment_use_count()
+                        db.commit()
+                    except Exception as e:
+                        logger.warning(f"Failed to update usage count for {actual_model_name}: {e}")
+                    
+                    text_content = result.get("text", "")
+                else:
+                    # Transcribe using queued audio processing
+                    result = await queued_transcribe_audio(
+                        model_name=actual_model_name,
+                        file_path=temp_file_path,
+                        language=language,
+                        initial_prompt=prompt,
+                        temperature=temperature
+                    )
+                    text_content = result.get("text", "")
 
                 # Return response based on format
                 if response_format == "json":
@@ -1629,7 +1694,10 @@ def create_app() -> FastAPI:
                 elif response_format == "text":
                     return Response(content=text_content, media_type="text/plain")
                 elif response_format == "verbose_json":
-                    if isinstance(result, dict):
+                    if use_direct_whisper:
+                        # Direct whisper returns full result dict
+                        return result
+                    elif isinstance(result, dict):
                         return result
                     else:
                         return {"text": text_content}

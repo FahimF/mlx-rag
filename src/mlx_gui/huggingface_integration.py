@@ -281,15 +281,33 @@ class HuggingFaceClient:
     def _extract_model_info(self, model) -> Optional[ModelInfo]:
         """Extract ModelInfo from HuggingFace model object."""
         try:
+            # Check if model.id is None
+            if not hasattr(model, 'id') or model.id is None:
+                logger.warning("Model object has no id attribute or id is None")
+                return None
+            
             # Parse model ID
             parts = model.id.split("/")
             author = parts[0] if len(parts) > 1 else "unknown"
             name = parts[-1]
             
             # Check if model is MLX compatible
-            tags = model.tags or []
-            mlx_compatible = any(tag.lower() in self.mlx_tags for tag in tags)
-            has_mlx_version = "mlx" in tags
+            tags = getattr(model, 'tags', None) or []
+            library_name = getattr(model, 'library_name', None)
+            
+            # Model is MLX compatible if:
+            # 1. Has MLX tags
+            # 2. Has library="mlx" 
+            # 3. Is in mlx-community namespace
+            # 4. Has explicit MLX in tags
+            mlx_compatible = (
+                any(tag and tag.lower() in self.mlx_tags for tag in tags if tag is not None) or
+                library_name == "mlx" or
+                (model.id and "mlx-community/" in model.id) or
+                "mlx" in tags
+            )
+            
+            has_mlx_version = "mlx" in tags or library_name == "mlx"
             
             # If not explicitly MLX tagged, check if there's an MLX version
             mlx_repo_id = None
@@ -340,6 +358,11 @@ class HuggingFaceClient:
     def _estimate_model_size(self, model) -> Optional[float]:
         """Calculate model memory requirements from parameter count and quantization."""
         try:
+            # Check if model.id is None
+            if not hasattr(model, 'id') or model.id is None:
+                logger.warning("Model object has no id attribute or id is None in _estimate_model_size")
+                return None
+            
             model_name = model.id.lower()
             param_count_billions = None
             matched_pattern = None
@@ -461,21 +484,29 @@ class HuggingFaceClient:
     
     def _determine_model_type(self, model, tags: List[str]) -> str:
         """Determine model type from tags and metadata."""
-        tags_lower = [tag.lower() for tag in tags]
-        pipeline_tag = getattr(model, 'pipeline_tag', '').lower()
+        tags_lower = [tag.lower() for tag in tags if tag is not None]
+        pipeline_tag = (getattr(model, 'pipeline_tag', None) or '').lower()
         
         # Check for embedding models first (by pipeline tag)
-        if pipeline_tag == 'feature-extraction':
+        if pipeline_tag in ['feature-extraction', 'sentence-similarity']:
             return 'embedding'
         
         # Check for embedding models by tags
-        if any(tag in tags_lower for tag in ['embedding', 'sentence-transformers', 'feature-extraction']):
+        if any(tag in tags_lower for tag in ['embedding', 'sentence-transformers', 'feature-extraction', 'sentence-similarity']):
             return 'embedding'
         
-        # Check for embedding models by name patterns
-        model_name_lower = model.id.lower()
-        if any(pattern in model_name_lower for pattern in ['embedding', 'bge-', 'e5-', 'all-minilm', 'sentence']):
-            return 'embedding'
+        # Check for embedding models by name patterns (comprehensive list)
+        # Safely handle case where model.id might be None
+        if hasattr(model, 'id') and model.id is not None:
+            model_name_lower = model.id.lower()
+            embedding_patterns = [
+                'embedding', 'bge-', 'e5-', 'all-minilm', 'sentence',
+                'modernbert-embed', 'arctic-embed', 'gte-', 'embed-base',
+                'multilingual-e5', 'nomicai-modernbert', 'tasksource-modernbert',
+                'snowflake-arctic', 'qwen3-embedding', 'qwen-embedding'
+            ]
+            if any(pattern in model_name_lower for pattern in embedding_patterns):
+                return 'embedding'
         
         # Check for multimodal capabilities (expanded detection)
         # Priority: Check pipeline tags first for multimodal
@@ -541,7 +572,8 @@ class HuggingFaceClient:
     
     def get_specific_embedding_models(self) -> List[str]:
         """Get list of high-priority MLX embedding models."""
-        return [
+        # Static list of known high-quality models
+        static_models = [
             "mlx-community/bge-large-en-v1.5-4bit",
             "mlx-community/bge-base-en-v1.5-4bit", 
             "mlx-community/e5-large-v2-4bit",
@@ -550,8 +582,27 @@ class HuggingFaceClient:
             "mlx-community/gte-large-4bit",
             "mlx-community/sentence-transformers-all-MiniLM-L6-v2-4bit",
             "mlx-community/multilingual-e5-large-4bit",
-            "mlx-community/text-embedding-ada-002-4bit"
+            "mlx-community/text-embedding-ada-002-4bit",
+            # Add popular sentence-similarity models
+            "mlx-community/multilingual-e5-base-mlx",
+            "mlx-community/multilingual-e5-small-mlx",
+            "mlx-community/nomicai-modernbert-embed-base-4bit",
+            "mlx-community/all-MiniLM-L6-v2-4bit",
+            "mlx-community/snowflake-arctic-embed-l-v2.0-4bit"
         ]
+        
+        # Try to get dynamic list from search, fallback to static
+        try:
+            dynamic_models = self.search_embedding_models(limit=15)
+            if dynamic_models:
+                # Combine static and dynamic, prioritizing dynamic
+                dynamic_ids = [model.id for model in dynamic_models[:10]]
+                combined = dynamic_ids + [model for model in static_models if model not in dynamic_ids]
+                return combined[:15]  # Limit to 15 total
+        except Exception as e:
+            logger.warning(f"Failed to get dynamic embedding models: {e}")
+        
+        return static_models
 
     def get_model_categories(self) -> Dict[str, List[str]]:
         """Get categorized lists of popular MLX models."""
@@ -580,21 +631,22 @@ class HuggingFaceClient:
                     categories['Multimodal Models'].append(model.id)
                 elif model.model_type == 'audio':
                     # Split audio models into TTS vs STT
-                    if any(keyword in model.id.lower() for keyword in ['tts', 'text-to-speech', 'speech-synthesis', 'kokoro', 'bark', 'f5-tts']):
+                    # Safely handle case where model.id might be None
+                    if model.id and any(keyword in model.id.lower() for keyword in ['tts', 'text-to-speech', 'speech-synthesis', 'kokoro', 'bark', 'f5-tts']):
                         categories['Popular TTS'].append(model.id)
-                    elif any(keyword in model.id.lower() for keyword in ['whisper', 'stt', 'speech-to-text', 'transcrib', 'asr']):
+                    elif model.id and any(keyword in model.id.lower() for keyword in ['whisper', 'stt', 'speech-to-text', 'transcrib', 'asr', 'parakeet', 'tdt']):
                         categories['Popular STT'].append(model.id)
                     else:
                         # Default audio models to STT if unclear
                         categories['Popular STT'].append(model.id)
                 
                 # Check for code models
-                if any(tag in model.tags for tag in ['code', 'coding', 'programming']):
+                if any(tag in (getattr(model, 'tags', None) or []) for tag in ['code', 'coding', 'programming']):
                     categories['Code Models'].append(model.id)
                 
                 # Check for chat models (text and multimodal that are conversational)
                 if (model.model_type in ['text', 'multimodal'] and 
-                    any(tag in model.tags for tag in ['chat', 'conversational', 'instruct', 'assistant'])):
+                    any(tag in (getattr(model, 'tags', None) or []) for tag in ['chat', 'conversational', 'instruct', 'assistant'])):
                     categories['Popular Chat'].append(model.id)
                 
                 # Size-based categories
@@ -651,9 +703,11 @@ class HuggingFaceClient:
                 models = self.search_mlx_models(audio_query, limit=limit)
                 for model in models:
                     # Filter for audio models
+                    # Safely handle case where model.id might be None
+                    model_id_check = model.id and any(keyword in model.id.lower() for keyword in ['whisper', 'tts', 'speech', 'audio', 'parakeet'])
                     if (model.model_type == 'audio' or 
-                        any(tag in model.tags for tag in ['audio', 'speech', 'whisper', 'tts', 'automatic-speech-recognition']) or
-                        any(keyword in model.id.lower() for keyword in ['whisper', 'tts', 'speech', 'audio'])):
+                        any(tag in (getattr(model, 'tags', None) or []) for tag in ['audio', 'speech', 'whisper', 'tts', 'automatic-speech-recognition']) or
+                        model_id_check):
                         if model.id not in [m.id for m in all_audio_models]:
                             all_audio_models.append(model)
             except Exception as e:
@@ -678,8 +732,10 @@ class HuggingFaceClient:
             try:
                 models = self.search_mlx_models(tts_query, limit=limit)
                 for model in models:
-                    if (any(keyword in model.id.lower() for keyword in ['tts', 'text-to-speech', 'speech-synthesis', 'kokoro', 'bark', 'f5-tts']) or
-                        any(tag in model.tags for tag in ['text-to-speech', 'tts'])):
+                    # Safely handle case where model.id might be None
+                    model_id_check = model.id and any(keyword in model.id.lower() for keyword in ['tts', 'text-to-speech', 'speech-synthesis', 'kokoro', 'bark', 'f5-tts'])
+                    if (model_id_check or
+                        any(tag in (getattr(model, 'tags', None) or []) for tag in ['text-to-speech', 'tts'])):
                         if model.id not in [m.id for m in tts_models]:
                             tts_models.append(model)
             except Exception as e:
@@ -690,43 +746,18 @@ class HuggingFaceClient:
         return tts_models[:limit]
     
     def search_stt_models(self, query: str = "", limit: int = 10) -> List[ModelInfo]:
-        """Search specifically for Speech-to-Text models."""
-        stt_queries = []
-        if query:
-            stt_queries.append(f"{query} whisper")
-            stt_queries.append(f"{query} stt")
-        else:
-            stt_queries = ["whisper mlx", "stt mlx", "speech-to-text mlx", "transcription mlx"]
-        
-        stt_models = []
-        for stt_query in stt_queries:
-            try:
-                models = self.search_mlx_models(stt_query, limit=limit)
-                for model in models:
-                    if (any(keyword in model.id.lower() for keyword in ['whisper', 'stt', 'speech-to-text', 'transcrib', 'asr']) or
-                        any(tag in model.tags for tag in ['automatic-speech-recognition', 'speech-to-text', 'transcription'])):
-                        if model.id not in [m.id for m in stt_models]:
-                            stt_models.append(model)
-            except Exception as e:
-                logger.warning(f"Error searching STT models with query '{stt_query}': {e}")
-                continue
-        
-        stt_models.sort(key=lambda x: x.downloads, reverse=True)
-        return stt_models[:limit]
-    
-    def search_embedding_models(self, query: str = "", limit: int = 20) -> List[ModelInfo]:
-        """Search specifically for embedding models using HuggingFace pipeline filters."""
+        """Search specifically for Speech-to-Text models using HuggingFace pipeline filters."""
         try:
-            embedding_models = []
+            stt_models = []
             models_dict = {}
             
-            # Method 1: Use pipeline_tag=feature-extraction&library=mlx (exact match to URL)
+            # Method 1: Use pipeline_tag=automatic-speech-recognition&library=mlx (exact match to URL)
             try:
-                logger.info("Searching for embedding models using pipeline_tag=feature-extraction&library=mlx")
+                logger.info("Searching for STT models using pipeline_tag=automatic-speech-recognition&library=mlx")
                 
-                # This matches exactly: https://huggingface.co/models?pipeline_tag=feature-extraction&library=mlx&sort=downloads
+                # This matches exactly: https://huggingface.co/models?pipeline_tag=automatic-speech-recognition&library=mlx&sort=trending
                 pipeline_models = list_models(
-                    pipeline_tag="feature-extraction",
+                    pipeline_tag="automatic-speech-recognition",
                     library="mlx",
                     sort="downloads", 
                     limit=50,  # More focused search with library filter
@@ -736,17 +767,109 @@ class HuggingFaceClient:
                 
                 # Convert generator to list and count
                 pipeline_models_list = list(pipeline_models)
-                logger.info(f"Found {len(pipeline_models_list)} MLX feature-extraction models with library filter")
+                logger.info(f"Found {len(pipeline_models_list)} MLX STT models with library filter")
                 
-                # Add all models since they already have library=mlx filter
                 for model in pipeline_models_list:
-                    models_dict[model.id] = model
-                    logger.debug(f"Found MLX embedding model: {model.id}")
+                    try:
+                        model_info = self._extract_model_info(model)
+                        if model_info and model_info.id not in models_dict:
+                            models_dict[model_info.id] = model_info
+                            stt_models.append(model_info)
+                    except Exception as e:
+                        logger.warning(f"Error processing STT model {getattr(model, 'id', 'unknown')}: {e}")
+                        continue
+                        
+            except Exception as e:
+                logger.warning(f"Error searching STT models with pipeline filter: {e}")
+            
+            # Method 2: Fallback to text search for additional models
+            stt_queries = []
+            if query:
+                stt_queries.append(f"{query} whisper")
+                stt_queries.append(f"{query} stt")
+                stt_queries.append(f"{query} parakeet")
+            else:
+                stt_queries = ["whisper mlx", "stt mlx", "speech-to-text mlx", "transcription mlx", "parakeet mlx", "parakeet tdt"]
+            
+            for stt_query in stt_queries:
+                try:
+                    models = self.search_mlx_models(stt_query, limit=20)
+                    for model in models:
+                        # Safely handle case where model.id might be None
+                        model_id_check = model.id and any(keyword in model.id.lower() for keyword in ['whisper', 'stt', 'speech-to-text', 'transcrib', 'asr', 'parakeet', 'tdt'])
+                        if (model_id_check or
+                            any(tag in (getattr(model, 'tags', None) or []) for tag in ['automatic-speech-recognition', 'speech-to-text', 'transcription'])):
+                            if model.id not in models_dict:
+                                models_dict[model.id] = model
+                                stt_models.append(model)
+                except Exception as e:
+                    logger.warning(f"Error searching STT models with query '{stt_query}': {e}")
+                    continue
+            
+            stt_models.sort(key=lambda x: x.downloads, reverse=True)
+            return stt_models[:limit]
+            
+        except Exception as e:
+            logger.error(f"Error in search_stt_models: {e}")
+            return []
+    
+    def search_embedding_models(self, query: str = "", limit: int = 20) -> List[ModelInfo]:
+        """Search specifically for embedding models using HuggingFace pipeline filters."""
+        try:
+            embedding_models = []
+            models_dict = {}
+            
+            # Method 1a: Use pipeline_tag=feature-extraction&library=mlx
+            try:
+                logger.info("Searching for embedding models using pipeline_tag=feature-extraction&library=mlx")
                 
-                logger.info(f"Added {len(pipeline_models_list)} MLX embedding models from pipeline+library filter")
+                # This matches: https://huggingface.co/models?pipeline_tag=feature-extraction&library=mlx&sort=downloads
+                feature_models = list_models(
+                    pipeline_tag="feature-extraction",
+                    library="mlx",
+                    sort="downloads", 
+                    limit=50,
+                    direction=-1,
+                    token=self.token
+                )
+                
+                feature_models_list = list(feature_models)
+                logger.info(f"Found {len(feature_models_list)} MLX feature-extraction models")
+                
+                for model in feature_models_list:
+                    models_dict[model.id] = model
+                    logger.debug(f"Found MLX feature-extraction model: {model.id}")
                 
             except Exception as e:
-                logger.warning(f"Error using HuggingFace pipeline_tag+library filter for embeddings: {e}")
+                logger.warning(f"Error searching feature-extraction models: {e}")
+            
+            # Method 1b: Use pipeline_tag=sentence-similarity&library=mlx (NEW!)
+            try:
+                logger.info("Searching for embedding models using pipeline_tag=sentence-similarity&library=mlx")
+                
+                # This matches: https://huggingface.co/models?pipeline_tag=sentence-similarity&library=mlx&sort=trending
+                sentence_models = list_models(
+                    pipeline_tag="sentence-similarity",
+                    library="mlx",
+                    sort="downloads", 
+                    limit=50,
+                    direction=-1,
+                    token=self.token
+                )
+                
+                sentence_models_list = list(sentence_models)
+                logger.info(f"Found {len(sentence_models_list)} MLX sentence-similarity models")
+                
+                for model in sentence_models_list:
+                    if model.id not in models_dict:  # Avoid duplicates
+                        models_dict[model.id] = model
+                        logger.debug(f"Found MLX sentence-similarity model: {model.id}")
+                
+            except Exception as e:
+                logger.warning(f"Error searching sentence-similarity models: {e}")
+            
+            total_pipeline_models = len(models_dict)
+            logger.info(f"Total MLX embedding models from pipeline searches: {total_pipeline_models}")
             
             # Method 1.5: Fallback without library filter for broader coverage
             try:
@@ -768,9 +891,10 @@ class HuggingFaceClient:
                 for model in all_embedding_list:
                     if model.id not in models_dict:  # Only add if not already found
                         model_tags = getattr(model, 'tags', []) or []
+                        # Safely handle case where model.id might be None
+                        model_id_check = model.id and (model.id.startswith('mlx-community/') or 'mlx' in model.id.lower())
                         is_mlx = (any(tag.lower() in self.mlx_tags for tag in model_tags) or 
-                                 model.id.startswith('mlx-community/') or
-                                 'mlx' in model.id.lower())
+                                 model_id_check)
                         
                         if is_mlx:
                             models_dict[model.id] = model
@@ -839,10 +963,11 @@ class HuggingFaceClient:
                         
                         for model in pattern_models_list:
                             # Check if model has MLX in tags or is from mlx-community
+                            # Safely handle case where model.id might be None
                             model_tags = getattr(model, 'tags', []) or []
+                            model_id_check = model.id and (model.id.startswith('mlx-community/') or 'mlx' in model.id.lower())
                             is_mlx = (any(tag.lower() in self.mlx_tags for tag in model_tags) or 
-                                     model.id.startswith('mlx-community/') or
-                                     'mlx' in model.id.lower())
+                                     model_id_check)
                             
                             if is_mlx:
                                 models_dict[model.id] = model
@@ -931,10 +1056,11 @@ class HuggingFaceClient:
                 mlx_count = 0
                 for model in all_vision_models_list:
                     # Check if model has MLX in tags or is from mlx-community
+                    # Safely handle case where model.id might be None
                     model_tags = getattr(model, 'tags', []) or []
+                    model_id_check = model.id and (model.id.startswith('mlx-community/') or 'mlx' in model.id.lower())
                     is_mlx = (any(tag.lower() in self.mlx_tags for tag in model_tags) or 
-                             model.id.startswith('mlx-community/') or
-                             'mlx' in model.id.lower())
+                             model_id_check)
                     
                     if is_mlx:
                         models_dict[model.id] = model
@@ -965,8 +1091,10 @@ class HuggingFaceClient:
                 vision_count = 0
                 for model in tag_models_list:
                     # Only include if it looks like a vision model
+                    # Safely handle case where model.id might be None
+                    model_id_check = model.id and any(keyword in model.id.lower() for keyword in ['llava', 'vision', 'vl', 'multimodal'])
                     if (hasattr(model, 'pipeline_tag') and model.pipeline_tag == 'image-text-to-text') or \
-                       any(keyword in model.id.lower() for keyword in ['llava', 'vision', 'vl', 'multimodal']):
+                       model_id_check:
                         if model.id not in models_dict:  # Avoid duplicates
                             models_dict[model.id] = model
                             vision_count += 1

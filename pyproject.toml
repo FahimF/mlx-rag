@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mlx-gui"
-version = "1.2.3"
+version = "1.2.4"
 description = "A lightweight RESTful wrapper around Apple's MLX engine for dynamically loading and serving MLX-compatible models"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -41,6 +41,7 @@ dependencies = [
     "mlx-whisper>=0.4.0",
     "mlx-audio>=0.1.0",
     "mlx-vlm>=0.1.0",
+    "mlx_embedding_models>=0.0.3",
 ]
 
 [project.optional-dependencies]

@@ -25,85 +25,60 @@
 
 ## 📦 Latest Release
 
-### v1.2.3 - Real-Time Model Status & Model Support (July 19 2025)
+### 🎉 v1.2.4 - Universal AI Ecosystem (July 22 2025)
 
-🚀 **Real-Time Status Monitoring**
-- ✅ **Live Model Status** - Added real-time status tracking for model loading, including download progress.
-- 📊 **Detailed Status View** - See download percentage, speed, and ETA directly in the UI.
-- 🐛 **Fixed Status Endpoint** - Resolved a critical bug causing the server to crash when checking model status.
-- 🖼️ **See it in action:**
-  <img src="media/status.gif" width="600">
+#### 🚀 **NEW: Advanced Audio Intelligence**
+- 🎙️ **Enhanced Whisper Support** - Complete MLX-Whisper integration with Turbo, Large v3, and all model variants
+- 🎯 **Parakeet TDT Audio** - Ultra-fast speech-to-text with parakeet-tdt-0.6b-v2 model support
+- 📊 **Audio Streaming API** - Real-time transcription with OpenAI-compatible `/v1/audio/transcriptions` endpoint
+- 🔊 **Multi-Format Support** - Process WAV, MP3, M4A, and other audio formats seamlessly
 
-🧪 **New API Test Console**
-- ✅ **Built-in API Testing** - Added dedicated API Test tab in the admin interface for single-turn testing
-- 🎯 **Model Selection** - Test any loaded model with customizable parameters (temperature, max tokens, system messages)
-- 📊 **Response Analytics** - View response time, token count, and detailed statistics
-- 📝 **Test History** - Keep track of recent API tests with timestamps and performance metrics
-- ⚡ **Quick Validation** - Perfect for testing model responses and API functionality
-🚀 **Comprehensive Model Ecosystem**
-- ✅ **15+ New Verified Models** - Added support for trending MLX models including SmolLM3, Kimi-K2, Gemma-3n, and more
-- 🧠 **Trillion-Parameter Support** - Added detection for ultra-large models like Kimi-K2-Instruct (1.02T parameters)
-- 🎯 **Enhanced Model Discovery** - Improved trending models endpoint with curated high-performance models
-- 🔍 **Smart Multimodal Detection** - Fixed classification for models like Gemma-3n to properly show as "Multimodal"
+#### 🧠 **NEW: Production-Ready Embeddings**
+- ⚡ **Multi-Architecture Support** - BGE, MiniLM, Qwen3, Arctic, and E5 embedding models
+- 🔄 **Universal Embedding Pipeline** - Automatic model detection and optimization for each architecture
+- 📈 **Massive Scale Support** - From 384-dim MiniLM to 4096-dim Qwen3 embeddings
+- 🎯 **OpenAI-Compatible API** - Drop-in replacement with `/v1/embeddings` endpoint
+- 🔢 **Normalized Vectors** - Ready for similarity search and RAG applications
 
-🎨 **New Verified Tested Models**
-- **SmolLM3-3B-4bit** - Multilingual 481M parameter model with 8-language support
-- **Kimi-Dev-72B-4bit-DWQ** - Large reasoning model with advanced capabilities
-- **Kimi-K2-Instruct-4bit** - Ultra-large 1.02T parameter instruction-tuned model
-- **Llama-3.2-3B-Instruct-4bit** - Meta's instruction-following model with 502M parameters
-- **Gemma-2-9B-it-4bit** - Google's advanced reasoning model with 1.44B parameters
-- **Qwen3-30B-A3B-4bit-DWQ** - MoE model with 30B total/3B active parameters
-- **Gemma-3n-E4B-it-MLX-4bit** - Advanced multimodal model with image/audio/text capabilities
+#### 🤖 **NEW: Mistral Small Integration**
+- ✨ **24B Parameter Model** - Full support for Mistral-Small-3.2-24B-Instruct
+- 🎨 **Vision-Text Capability** - Advanced multimodal processing via MLX-VLM
+- 🧪 **Test Suite Integration** - Comprehensive testing ensuring reliable performance
+- 🔧 **Smart Classification** - Automatic detection and proper model type assignment
 
-🔧 **Technical Improvements**
-- 🎯 **Improved Model Type Classification** - Enhanced detection for multimodal models with image-text-to-text capabilities
-- 📊 **Expanded Parameter Patterns** - Added support for trillion-scale model memory estimation
-- 🧪 **Comprehensive Test Suite** - Added dedicated test scripts for all new models with streaming/non-streaming validation
-- 🔄 **Install-Load Workflow** - Updated all tests to follow proper MLX-GUI model lifecycle (install → load → use)
+#### 🛠️ **Technical Excellence**
+- 🎯 **Pipeline Reliability** - Fixed model mapping issues and test inconsistencies
+- 📊 **Enhanced Memory Management** - Optimized loading for large embedding and audio models
+- 🔍 **Robust Error Handling** - Better fallback mechanisms and debugging capabilities
+- ⚡ **Performance Optimization** - Faster model switching and queue processing
 
-### v1.2.2 - Complete CyberAI Image Compatibility (July 15 2025)
+---
 
-🔧 **Critical CyberAI Fix**
-- ✅ **Raw Base64 Image Support** - Fixed CyberAI images by adding support for raw base64 data (no `data:image/` prefix)
-- 🔍 **Automatic Format Detection** - Detects PNG, JPEG, GIF, and WebP from binary headers
-- 🛠️ **Enhanced Image Processing** - Improved raw base64 validation and error handling
-- ✅ **Verified Fix** - Tested and confirmed working with actual CyberAI client requests
+## 📚 Previous Releases
 
-### v1.2.1 - Enhanced Image Compatibility (July 15 2025)
+<details>
+<summary><strong>v1.2.3</strong> - Real-Time Model Status & Model Support (July 19 2025)</summary>
 
-🖼️ **Improved Vision Model Compatibility**
-- ✅ **Enhanced Image Format Support** - Fixed vision models not seeing images from certain OpenAI-compatible clients
-- 🔧 **Multiple Image URL Formats** - Now supports various ways clients send images (`image_url.url`, `image_url.image`, direct `image` fields)
-- 🤖 **CyberAI Compatibility** - Resolved image processing issues with CyberAI and other third-party clients
-- 🛠️ **Robust Image Parsing** - Added fallback handling for different OpenAI API image formats
-- 🎯 **Better Error Handling** - Improved debugging and error messages for image processing failures
+**Key Features:**
+- 🚀 Real-time status monitoring with download progress
+- 🧪 Built-in API test console with response analytics
+- 🎨 15+ new verified models including SmolLM3, Kimi-K2, Gemma-3n
+- 🧠 Trillion-parameter model support
+- 🔧 Enhanced model type classification
 
-### v1.2.0 - Advanced Memory Management & VLM Stability (July 13 2025)
+</details>
 
-🧠 **Revolutionary Memory Management**
-- ✅ **Intelligent Auto-Unload System** - Automatically unloads oldest models when memory limits are reached
-- 🔄 **Three-Layer Memory Protection** - Proactive cleanup, concurrent limits, and emergency memory recovery
-- ⚡ **Memory Error Detection** - Detects MLX memory errors and retries with automatic model unloading
-- 📊 **Smart LRU Eviction** - Least Recently Used models are automatically freed to make room for new ones, this is 🪟TRANSPARENT to the users.
-- 🛡️ **Memory Overload Recovery** - Up to 3 retry attempts with intelligent memory cleanup between attempts
-- ⚡️ **Core Updates** - Updated to MLX-LM 0.26.0 and MLX-VLM 0.3.1
+<details>
+<summary><strong>v1.2.0-v1.2.2</strong> - Memory Management & Vision Compatibility</summary>
 
-🔧 **Enhanced VLM Stability**
-- 🖼️ **Fixed Vision Model Queue Issues** - Resolved concurrent loading problems with MLX-VLM models
-- 🎯 **Improved Image Token Handling** - Better processing of vision inputs in queue system
-- 🔄 **Robust Multimodal Support** - Enhanced stability for Gemma-3n, Qwen2-VL, and LLaVA models
-- 📸 **Optimized Memory Usage** - Better memory management for large vision models
+**Key Features:**
+- 🧠 Revolutionary auto-unload system with LRU eviction
+- 🖼️ Complete CyberAI image compatibility
+- 🔄 Three-layer memory protection
+- 📸 Enhanced VLM stability for vision models
+- 🛠️ Raw base64 image support
 
-🚀 **Performance Improvements**
-- ⚡ **Faster Model Loading** - Optimized queue processing with better error handling
-- 🏗️ **Enhanced Concurrent Processing** - Improved handling of multiple simultaneous requests
-- 📈 **Better Resource Utilization** - Smarter memory allocation and cleanup strategies
-- 🔍 **Comprehensive Testing** - Added memory overload tests and queue verification
-
-🛠️ **Technical Enhancements**
-- 🧪 **Advanced Testing Suite** - New memory management tests and VLM stability verification
-- 📝 **Improved Logging** - Better visibility into memory management and model lifecycle
-- 🔧 **Enhanced Error Recovery** - More robust handling of edge cases and memory constraints
+</details>
 
 **Download:** [Latest Release](https://github.com/RamboRogers/mlx-gui/releases/latest)
 
@@ -133,19 +108,49 @@
 
 ## 🚀 Features
 
+### 🎯 **Universal AI Capabilities**
 - **🧠 MLX Engine Integration** - Native Apple Silicon acceleration via MLX
-- **🔄 Intelligent Memory Management** - Advanced auto-unload system with LRU eviction and memory error recovery
-- **🛡️ Three-Layer Memory Protection** - Proactive cleanup, concurrent limits, and emergency memory recovery
+- **🎙️ Advanced Audio Intelligence** - Complete Whisper & Parakeet support with multi-format processing
+- **🔢 Production Embeddings** - Multi-architecture support (BGE, MiniLM, Qwen3, Arctic, E5)
+- **🖼️ Vision Models** - Image understanding with Gemma-3n, Qwen2-VL, Mistral Small (enhanced stability)
+- **🤖 Large Language Models** - Full support for instruction-tuned and reasoning models
+
+### 🛠️ **Enterprise-Grade Infrastructure**
+- **🔄 Intelligent Memory Management** - Advanced auto-unload system with LRU eviction
+- **🛡️ Three-Layer Memory Protection** - Proactive cleanup, concurrent limits, emergency recovery
+- **⚡ OpenAI Compatibility** - Drop-in replacement for OpenAI API endpoints
 - **🌐 REST API Server** - Complete API for model management and inference
+- **📊 Real-Time Monitoring** - System status, memory usage, and model performance
+
+### 🎨 **User Experience**
 - **🎨 Beautiful Admin Interface** - Modern web GUI for model management
-- **📊 System Monitoring** - Real-time memory usage and system status with memory warnings
 - **🔍 HuggingFace Integration** - Discover and install MLX-compatible models
-- **🎙️ Audio Support** - Speech-to-text with Whisper and Parakeet models
-- **🖼️ Vision Models** - Image understanding with Gemma-3n, Qwen2-VL, LLaVA models (enhanced stability)
-- **🔢 Embeddings Support** - Text embeddings with OpenAI-compatible API
 - **🍎 macOS System Tray** - Native menu bar integration
-- **⚡ OpenAI Compatibility** - Drop-in replacement for OpenAI API
 - **📱 Standalone App** - Packaged macOS app bundle (no Python required)
+
+## 🤖 Tested Models
+
+**Text Generation**
+- `qwen3-8b-6bit` - Qwen3 8B quantized model
+- `deepseek-r1-0528-qwen3-8b-mlx-8bit` - DeepSeek R1 reasoning model
+- `smollm3-3b-4bit` / `smollm3-3b-bf16` - SmolLM3 multilingual models
+- `gemma-3-27b-it-qat-4bit` - Google Gemma 3 27B instruction-tuned
+- `mistral-small-3-2-24b-instruct-2506-mlx-4bit` - Mistral Small 24B with vision
+- `devstral-small-2507-mlx-4bit` - Devstral coding model
+
+**Vision Models**
+- `gemma-3n-e4b-it` / `gemma-3n-e4b-it-mlx-8bit` - Gemma 3n vision models
+- `mistral-small-3-2-24b-instruct-2506-mlx-4bit` - Multimodal capabilities
+
+**Audio Transcription**
+- `whisper-large-v3-turbo` - OpenAI Whisper Turbo for fast transcription
+- `parakeet-tdt-0-6b-v2` - Ultra-fast Parakeet speech-to-text
+
+**Text Embeddings**
+- `qwen3-embedding-4b-4bit-dwq` - Qwen3 embeddings (2560 dimensions)
+- `bge-small-en-v1-5-bf16` - BGE embeddings (384 dimensions)
+- `all-minilm-l6-v2-4bit` / `all-minilm-l6-v2-bf16` - MiniLM embeddings
+- `snowflake-arctic-embed-l-v2-0-4bit` - Arctic embeddings (1024 dimensions)
 
 ## 📋 Requirements
 
@@ -332,15 +337,23 @@ curl -X POST http://localhost:8000/v1/models/install \
 Full API documentation is available at `/v1/docs` when the server is running, or see [API.md](API.md) for complete endpoint reference.
 
 ### Key Endpoints
+
+#### 🎯 **Core AI Services**
+- `POST /v1/chat/completions` - OpenAI-compatible chat (text + images + Mistral Small)
+- `POST /v1/embeddings` - **NEW:** Multi-architecture embeddings (BGE, MiniLM, Qwen3, Arctic)
+- `POST /v1/audio/transcriptions` - **NEW:** Enhanced audio transcription (Whisper Turbo, Parakeet)
+
+#### 🛠️ **Model Management**
 - `GET /v1/models` - List installed models
 - `POST /v1/models/install` - Install from HuggingFace
 - `POST /v1/models/{name}/load` - Load model into memory
-- `POST /v1/chat/completions` - OpenAI-compatible chat (text + images)
-- `POST /v1/embeddings` - Generate text embeddings
-- `POST /v1/audio/transcriptions` - Audio transcription (Whisper/Parakeet)
 - `GET /v1/discover/models` - Search HuggingFace for MLX models
-- `GET /v1/discover/embeddings` - Search for embedding models
+- `GET /v1/discover/embeddings` - **NEW:** Search for embedding models
+- `GET /v1/discover/stt` - **NEW:** Search for audio transcription models
+
+#### 📊 **System Operations**
 - `GET /v1/system/status` - System and memory status
+- `GET /v1/manager/status` - Detailed model manager status
 
 ## 🛠️ Development
 

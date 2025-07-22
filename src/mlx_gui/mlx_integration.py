@@ -30,6 +30,20 @@ try:
 except ImportError:
     HAS_MLX_AUDIO = False
 
+# Embedding model imports (optional)
+try:
+    from mlx_embedding_models import EmbeddingModel
+    HAS_MLX_EMBEDDING_MODELS = True
+except ImportError:
+    HAS_MLX_EMBEDDING_MODELS = False
+
+# MLX embeddings library (for MLX community embedding models)
+try:
+    from mlx_embeddings import load as mlx_embeddings_load, generate as mlx_embeddings_generate
+    HAS_MLX_EMBEDDINGS = True
+except ImportError:
+    HAS_MLX_EMBEDDINGS = False
+
 try:
     import parakeet_mlx
     HAS_PARAKEET_MLX = True
@@ -256,14 +270,29 @@ class MLXModelWrapper:
                     # This is a fallback that may not work for all models
                     hidden_states = outputs
 
-                # Mean pooling across sequence length (dim=1)
-                embedding = mx.mean(hidden_states, axis=1).squeeze()
+                # For embedding models, we want to pool across the sequence length (axis=1)
+                # to get a fixed-size representation per text
+                if hidden_states.ndim == 3:  # [batch, seq_len, hidden_dim]
+                    # Mean pooling across sequence length (dim=1) 
+                    # This gives us [batch, hidden_dim]
+                    embedding = mx.mean(hidden_states, axis=1).squeeze()
+                elif hidden_states.ndim == 2:  # [seq_len, hidden_dim] - single batch
+                    # Mean pooling across sequence length (dim=0)
+                    # This gives us [hidden_dim]
+                    embedding = mx.mean(hidden_states, axis=0)
+                else:
+                    # Fallback for unexpected shapes
+                    embedding = hidden_states.squeeze()
 
                 # Ensure we have a 1D array and convert to list
                 if embedding.ndim == 0:
                     embedding = mx.expand_dims(embedding, axis=0)
+                elif embedding.ndim > 1:
+                    # If still multi-dimensional, flatten to 1D
+                    embedding = embedding.flatten()
 
-                embeddings.append(embedding.tolist())
+                embedding_list = embedding.tolist()
+                embeddings.append(embedding_list)
 
             except Exception as e:
                 logger.error(f"Error generating embedding for text: {e}")
@@ -276,6 +305,472 @@ class MLXModelWrapper:
         return embeddings
 
 
+class MLXUniversalEmbeddingWrapper(MLXModelWrapper):
+    """Universal wrapper for various embedding model architectures."""
+    
+    def __init__(self, model_path: str, config: Dict[str, Any]):
+        # Load model and tokenizer
+        try:
+            model, tokenizer = load(model_path)
+            super().__init__(model, tokenizer, model_path, config)
+            self.model_type = "embedding"
+            self.architecture = self._detect_architecture(model_path, model)
+            logger.info(f"Loaded {self.architecture} embedding model from {model_path}")
+        except Exception as e:
+            logger.error(f"Failed to load universal embedding model: {e}")
+            # Re-raise the exception so it can fall back to other loading methods
+            raise RuntimeError(f"Universal embedding wrapper failed to load {model_path}: {e}") from e
+    
+    def _detect_architecture(self, model_path: str, model) -> str:
+        """Detect the model architecture for proper embedding extraction."""
+        path_lower = model_path.lower()
+        
+        # Check by model name patterns
+        if "qwen" in path_lower and "embedding" in path_lower:
+            return "qwen"
+        elif "gte" in path_lower and "qwen" in path_lower:
+            return "gte_qwen"
+        elif "modernbert" in path_lower:
+            return "modernbert"
+        elif "arctic" in path_lower:
+            return "xlm-roberta"  # Arctic models use xlm-roberta architecture
+        elif "e5" in path_lower:
+            return "e5"
+        elif "minilm" in path_lower:
+            return "minilm"
+        elif "bge" in path_lower:
+            return "bge"
+        
+        # Check by model class name
+        model_class = type(model).__name__.lower()
+        if "qwen" in model_class:
+            return "qwen"
+        elif "xlmroberta" in model_class or "xlm_roberta" in model_class:
+            return "xlm-roberta"
+        elif "bert" in model_class:
+            return "bert"
+        
+        # Default fallback
+        return "generic"
+    
+    def _get_hidden_states(self, input_ids) -> mx.array:
+        """Extract hidden states based on model architecture."""
+        if self.architecture in ["qwen", "gte_qwen"]:
+            # For Qwen-based models, extract hidden states manually
+            x = self.model.model.embed_tokens(input_ids)
+            for layer in self.model.model.layers:
+                x = layer(x)
+            if hasattr(self.model.model, 'norm'):
+                x = self.model.model.norm(x)
+            return x
+        
+        elif self.architecture in ["modernbert", "bert", "e5", "minilm", "bge", "xlm-roberta"]:
+            # For BERT-based models, try to access hidden states
+            outputs = self.model(input_ids)
+            
+            # Check various ways BERT models return hidden states
+            if hasattr(outputs, 'last_hidden_state'):
+                return outputs.last_hidden_state
+            elif hasattr(outputs, 'hidden_states') and outputs.hidden_states:
+                return outputs.hidden_states[-1]  # Last layer
+            elif isinstance(outputs, tuple) and len(outputs) > 1:
+                # Some models return (logits, hidden_states)
+                return outputs[1] if outputs[1].ndim == 3 else outputs[0]
+            else:
+                # If we only get logits, try to access the model's encoder
+                if hasattr(self.model, 'encoder'):
+                    return self.model.encoder(input_ids)
+                elif hasattr(self.model, 'model') and hasattr(self.model.model, 'encoder'):
+                    return self.model.model.encoder(input_ids)
+                else:
+                    # Last resort: use the raw output (may be logits)
+                    return outputs
+        
+        elif self.architecture == "arctic":
+            # Arctic models may have specific architecture
+            outputs = self.model(input_ids)
+            if hasattr(outputs, 'last_hidden_state'):
+                return outputs.last_hidden_state
+            else:
+                return outputs
+        
+        else:
+            # Generic approach
+            outputs = self.model(input_ids)
+            if hasattr(outputs, 'last_hidden_state'):
+                return outputs.last_hidden_state
+            else:
+                return outputs
+    
+    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings using architecture-specific extraction."""
+        if self.model is None or self.tokenizer is None:
+            raise RuntimeError("Universal embedding model not properly loaded")
+        
+        import time
+        start_time = time.time()
+        embeddings = []
+
+        for text in texts:
+            try:
+                # Tokenize the text
+                tokens = self.tokenizer.encode(text)
+                input_ids = mx.array([tokens])
+                
+                # Get hidden states using architecture-specific method
+                hidden_states = self._get_hidden_states(input_ids)
+                
+                # Pool across sequence length to get fixed-size representation
+                if hidden_states.ndim == 3:  # [batch, seq_len, hidden_dim]
+                    embedding = mx.mean(hidden_states, axis=1).squeeze()
+                elif hidden_states.ndim == 2:  # [seq_len, hidden_dim]
+                    embedding = mx.mean(hidden_states, axis=0)
+                else:
+                    embedding = hidden_states.squeeze()
+
+                # Normalize the embedding vector for similarity tasks
+                embedding_norm = mx.sqrt(mx.sum(embedding * embedding))
+                if embedding_norm > 1e-8:
+                    embedding = embedding / embedding_norm
+
+                # Convert to Python list
+                embedding_list = embedding.tolist()
+                
+                # Ensure proper format
+                if not isinstance(embedding_list, list):
+                    embedding_list = [float(embedding_list)]
+                elif len(embedding_list) == 0:
+                    # Fallback embedding size based on architecture
+                    default_size = {
+                        "qwen": 2560, "gte_qwen": 4096, "modernbert": 768,
+                        "arctic": 1024, "e5": 768, "minilm": 384, "bge": 384
+                    }.get(self.architecture, 768)
+                    embedding_list = [0.0] * default_size
+                
+                embeddings.append(embedding_list)
+
+            except Exception as e:
+                logger.error(f"Error generating {self.architecture} embedding for text: {e}")
+                # Return appropriate fallback embedding
+                default_size = {
+                    "qwen": 2560, "gte_qwen": 4096, "modernbert": 768,
+                    "arctic": 1024, "e5": 768, "minilm": 384, "bge": 384
+                }.get(self.architecture, 768)
+                embeddings.append([0.0] * default_size)
+
+        end_time = time.time()
+        logger.info(f"Generated {len(embeddings)} {self.architecture} embeddings in {end_time - start_time:.2f}s")
+        
+        # Log embedding stats for debugging
+        if embeddings and len(embeddings[0]) > 0:
+            sample_vals = embeddings[0][:5]
+            all_vals = [val for emb in embeddings for val in emb]
+            logger.info(f"{self.architecture} embedding stats - dims: {len(embeddings[0])}, sample: {sample_vals}, range: {min(all_vals):.3f} to {max(all_vals):.3f}")
+
+        return embeddings
+
+
+class MLXQwen3EmbeddingWrapper(MLXModelWrapper):
+    """Specialized wrapper for Qwen3 embedding models."""
+
+    def __init__(self, model_path: str, config: Dict[str, Any]):
+        # Load model and tokenizer for Qwen3 embeddings
+        try:
+            model, tokenizer = load(model_path)
+            super().__init__(model, tokenizer, model_path, config)
+            self.model_type = "embedding"
+            logger.info(f"Loaded Qwen3 embedding model from {model_path}")
+        except Exception as e:
+            logger.error(f"Failed to load Qwen3 embedding model: {e}")
+            super().__init__(None, None, model_path, config)
+            self.model_type = "embedding"
+
+    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings using Qwen3 model with proper embedding extraction."""
+        if self.model is None or self.tokenizer is None:
+            raise RuntimeError("Qwen3 embedding model not properly loaded")
+        
+        import time
+        start_time = time.time()
+        embeddings = []
+
+        for text in texts:
+            try:
+                # Tokenize the text
+                tokens = self.tokenizer.encode(text)
+                
+                # Convert to MLX array and add batch dimension
+                input_ids = mx.array([tokens])
+                
+                # For Qwen3 embeddings, we need to get hidden states, not logits
+                # The model() call returns logits, but we need to access the hidden states
+                # from the last layer before the language modeling head
+                
+                # Get the hidden states by calling the model's layers directly
+                x = self.model.model.embed_tokens(input_ids)
+                
+                # Apply each transformer layer
+                for layer in self.model.model.layers:
+                    x = layer(x)
+                
+                # Apply final layer norm
+                if hasattr(self.model.model, 'norm'):
+                    x = self.model.model.norm(x)
+                
+                # Now x contains the hidden states, not the logits
+                hidden_states = x
+
+                # For embedding models, we want to pool across the sequence length
+                if hidden_states.ndim == 3:  # [batch, seq_len, hidden_dim]
+                    # Mean pooling across sequence length to get fixed-size representation
+                    embedding = mx.mean(hidden_states, axis=1).squeeze()
+                elif hidden_states.ndim == 2:  # [seq_len, hidden_dim]
+                    # Mean pooling across sequence length
+                    embedding = mx.mean(hidden_states, axis=0)
+                else:
+                    # If 1D, use as-is (shouldn't happen for typical embedding models)
+                    embedding = hidden_states.squeeze()
+
+                # Normalize the embedding vector (important for similarity tasks)
+                # This makes it compatible with sentence-transformer expectations
+                embedding_norm = mx.sqrt(mx.sum(embedding * embedding))
+                if embedding_norm > 1e-8:  # Avoid division by zero
+                    embedding = embedding / embedding_norm
+
+                # Convert to Python list
+                embedding_list = embedding.tolist()
+                
+                # Ensure it's the right dimensionality (Qwen3-4B should be ~4096 dims)
+                if not isinstance(embedding_list, list):
+                    embedding_list = [float(embedding_list)]
+                elif len(embedding_list) == 0:
+                    # Fallback to reasonable embedding size
+                    embedding_list = [0.0] * 4096
+                
+                embeddings.append(embedding_list)
+
+            except Exception as e:
+                logger.error(f"Error generating Qwen3 embedding for text: {e}")
+                # Return a zero embedding as fallback (4096 dims for Qwen3-4B)
+                embeddings.append([0.0] * 4096)
+
+        end_time = time.time()
+        logger.info(f"Generated {len(embeddings)} Qwen3 embeddings in {end_time - start_time:.2f}s")
+        
+        # Log embedding stats for debugging
+        if embeddings and len(embeddings[0]) > 0:
+            sample_vals = embeddings[0][:10]
+            all_vals = [val for emb in embeddings for val in emb]
+            logger.info(f"Qwen3 embedding stats - dims: {len(embeddings[0])}, sample: {sample_vals[:5]}, range: {min(all_vals):.3f} to {max(all_vals):.3f}")
+
+        return embeddings
+
+
+class MLXMiniLMWrapper(MLXModelWrapper):
+    """Specialized wrapper for MiniLM models using mlx_embeddings library."""
+
+    def __init__(self, model_path: str, config: Dict[str, Any]):
+        # MiniLM models using mlx_embeddings don't use standard tokenizers
+        super().__init__(None, None, model_path, config)
+        self.model_type = "embedding"
+        self.embedding_model = None
+        self.tokenizer = None
+
+    def load_embedding_model(self):
+        """Load the MiniLM model using mlx_embeddings."""
+        if not HAS_MLX_EMBEDDINGS:
+            raise ImportError("mlx_embeddings is required for MiniLM models. Install with: pip install mlx_embeddings")
+        
+        try:
+            logger.info(f"Loading MiniLM model using mlx_embeddings: {self.model_path}")
+            self.embedding_model, self.tokenizer = mlx_embeddings_load(self.model_path)
+            logger.info("Successfully loaded MiniLM model via mlx_embeddings")
+        except Exception as e:
+            logger.error(f"Failed to load MiniLM model with mlx_embeddings: {e}")
+            raise
+
+    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings using mlx_embeddings library."""
+        if self.embedding_model is None:
+            self.load_embedding_model()
+        
+        try:
+            # Use mlx_embeddings generate function as shown in reference
+            output = mlx_embeddings_generate(self.embedding_model, self.tokenizer, texts=texts)
+            
+            # Extract normalized embeddings
+            embeddings = output.text_embeds
+            
+            # Convert MLX array to Python list
+            if hasattr(embeddings, 'tolist'):
+                embeddings_list = embeddings.tolist()
+            else:
+                embeddings_list = embeddings
+            
+            # Ensure proper format (list of lists)
+            if isinstance(embeddings_list, list) and len(embeddings_list) > 0:
+                if not isinstance(embeddings_list[0], list):
+                    # Single embedding, wrap in list
+                    embeddings_list = [embeddings_list]
+            
+            logger.info(f"Generated {len(embeddings_list)} MiniLM embeddings via mlx_embeddings")
+            return embeddings_list
+            
+        except Exception as e:
+            logger.error(f"Error generating MiniLM embeddings: {e}")
+            # Return fallback zero embeddings (384 dims for MiniLM-L6)
+            return [[0.0] * 384 for _ in texts]
+
+
+class MLXSentenceTransformerWrapper(MLXModelWrapper):
+    """Wrapper for models that require sentence-transformers (like XLM-RoBERTa Arctic models)."""
+    
+    def __init__(self, model_path: str, config: Dict[str, Any]):
+        # Initialize without loading MLX model since we'll use sentence-transformers
+        super().__init__(None, None, model_path, config)
+        self.model_type = "embedding"
+        self.sentence_model = None
+        self.load_sentence_transformer_model()
+    
+    def load_sentence_transformer_model(self):
+        """Load model using sentence-transformers library."""
+        try:
+            from sentence_transformers import SentenceTransformer
+            
+            # Map MLX community model paths to original Snowflake paths
+            model_path_mapping = {
+                'mlx-community/snowflake-arctic-embed-l-v2.0-4bit': 'Snowflake/snowflake-arctic-embed-l-v2.0',
+                'mlx-community/snowflake-arctic-embed-l-v2.0-bf16': 'Snowflake/snowflake-arctic-embed-l-v2.0',
+                'snowflake-arctic-embed-l-v2-0-4bit': 'Snowflake/snowflake-arctic-embed-l-v2.0',
+                'snowflake-arctic-embed-l-v2-0-bf16': 'Snowflake/snowflake-arctic-embed-l-v2.0',
+                'snowflake-arctic-embed-l-v2.0-4bit': 'Snowflake/snowflake-arctic-embed-l-v2.0',
+                'snowflake-arctic-embed-l-v2.0-bf16': 'Snowflake/snowflake-arctic-embed-l-v2.0',
+            }
+            
+            # Use mapped path if available, otherwise use original
+            actual_model_path = model_path_mapping.get(self.model_path, self.model_path)
+            logger.info(f"Loading Arctic model via sentence-transformers: {self.model_path} -> {actual_model_path}")
+            
+            self.sentence_model = SentenceTransformer(actual_model_path)
+            logger.info(f"Successfully loaded Arctic model via sentence-transformers")
+        except ImportError:
+            raise RuntimeError("sentence-transformers library is required for Arctic models. Install with: pip install sentence-transformers")
+        except Exception as e:
+            logger.error(f"Failed to load model with sentence-transformers: {e}")
+            raise RuntimeError(f"Failed to load Arctic model with sentence-transformers: {e}")
+    
+    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings using sentence-transformers."""
+        if self.sentence_model is None:
+            raise RuntimeError("Sentence transformer model not loaded")
+        
+        try:
+            import numpy as np
+            embeddings = self.sentence_model.encode(texts, convert_to_numpy=True)
+            # Convert numpy array to list of lists
+            if embeddings.ndim == 1:
+                embeddings = embeddings.reshape(1, -1)
+            return embeddings.tolist()
+        except Exception as e:
+            logger.error(f"Error generating embeddings with sentence-transformers: {e}")
+            raise RuntimeError(f"Failed to generate embeddings: {e}")
+
+
+class MLXEmbeddingWrapper(MLXModelWrapper):
+    """Specialized wrapper for MLX embedding models using mlx_embedding_models."""
+
+    def __init__(self, model_path: str, config: Dict[str, Any]):
+        # Embedding models don't use tokenizers in the same way
+        super().__init__(None, None, model_path, config)
+        self.model_type = "embedding"
+        self.embedding_model = None
+        self.model_name = None
+        
+        # Extract model name from path for registry lookup
+        if "/" in model_path:
+            self.model_name = model_path.split("/")[-1]
+        else:
+            self.model_name = model_path
+
+    def load_embedding_model(self):
+        """Load the embedding model using mlx_embedding_models."""
+        if not HAS_MLX_EMBEDDING_MODELS:
+            raise ImportError("mlx_embedding_models is required for embedding models. Install with: pip install mlx_embedding_models")
+        
+        try:
+            # Try to load from registry first (for supported models like BGE)
+            if "bge" in self.model_name.lower():
+                # Map to registry names
+                if "bge-small" in self.model_name.lower():
+                    registry_name = "bge-small"
+                elif "bge-base" in self.model_name.lower():
+                    registry_name = "bge-base"
+                elif "bge-large" in self.model_name.lower():
+                    registry_name = "bge-large"
+                else:
+                    registry_name = "bge-small"  # Default fallback
+                
+                logger.info(f"Loading BGE embedding model from registry: {registry_name}")
+                self.embedding_model = EmbeddingModel.from_registry(registry_name)
+            
+            elif "minilm" in self.model_name.lower():
+                # Map MLX community MiniLM models to original sentence-transformers
+                logger.info("Loading MiniLM embedding model from sentence-transformers")
+                self.embedding_model = EmbeddingModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+            
+            else:
+                # For other models, try loading from path
+                logger.info(f"Loading embedding model from path: {self.model_path}")
+                self.embedding_model = EmbeddingModel.from_pretrained(self.model_path)
+                
+        except Exception as e:
+            logger.error(f"Failed to load embedding model: {e}")
+            # Fallback to parent class behavior
+            raise
+
+    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings using mlx_embedding_models."""
+        if self.embedding_model is None:
+            self.load_embedding_model()
+        
+        try:
+            # Use the proper MLX embedding API
+            embeddings = self.embedding_model.encode(texts)
+            
+            # Convert MLX array to Python list
+            if hasattr(embeddings, 'tolist'):
+                embeddings = embeddings.tolist()
+            elif hasattr(embeddings, '__array__'):
+                # Handle numpy arrays
+                import numpy as np
+                embeddings = np.array(embeddings).tolist()
+            
+            # Ensure we return a list of lists
+            if isinstance(embeddings, list) and len(embeddings) > 0:
+                if not isinstance(embeddings[0], list):
+                    # Single embedding, wrap in list
+                    embeddings = [embeddings]
+                    
+                # Ensure all embeddings are lists of floats
+                result = []
+                for emb in embeddings:
+                    if isinstance(emb, list):
+                        result.append([float(x) for x in emb])
+                    else:
+                        result.append([float(x) for x in emb.tolist()] if hasattr(emb, 'tolist') else [float(emb)])
+                
+                return result
+            
+            # If we get here, something unexpected happened
+            logger.warning(f"Unexpected embeddings format: {type(embeddings)}")
+            return embeddings if isinstance(embeddings, list) else [embeddings]
+            
+        except Exception as e:
+            logger.error(f"Error generating embeddings with mlx_embedding_models: {e}")
+            # Fallback to parent class behavior if available
+            return super().generate_embeddings(texts)
+
+
 class MLXWhisperWrapper(MLXModelWrapper):
     """Specialized wrapper for MLX-Whisper models."""
 
@@ -283,39 +778,18 @@ class MLXWhisperWrapper(MLXModelWrapper):
         # Whisper models don't use tokenizers in the same way
         super().__init__(None, None, model_path, config)
         self.model_type = "whisper"
-        self.whisper_model = None
 
-    def load_whisper_model(self):
-        """Load the Whisper model using mlx-whisper."""
+    def transcribe_audio(self, audio_file_path: str, **kwargs):
+        """Transcribe audio file using MLX-Whisper."""
         if not HAS_MLX_WHISPER:
             raise ImportError("mlx-whisper is required for Whisper models. Install with: pip install mlx-whisper")
 
         try:
-            # Extract model name from path for mlx-whisper
-            model_name = self.model_path.split("/")[-1] if "/" in self.model_path else self.model_path
-            # Remove common prefixes/suffixes
-            if model_name.endswith("-mlx"):
-                model_name = model_name[:-4]
-            if model_name.startswith("whisper-"):
-                model_name = model_name[8:]
-
-            logger.info(f"Loading Whisper model: {model_name}")
-            self.whisper_model = mlx_whisper.load_model(model_name, path=self.model_path)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
-            return False
-
-    def transcribe_audio(self, audio_file_path: str, **kwargs):
-        """Transcribe audio file using MLX-Whisper."""
-        if not self.whisper_model:
-            if not self.load_whisper_model():
-                raise RuntimeError("Whisper model not loaded")
-
-        try:
+            logger.info(f"Transcribing audio with Whisper model at: {self.model_path}")
+            # Use the model path directly - mlx_whisper.transcribe loads the model internally
             result = mlx_whisper.transcribe(
                 audio=audio_file_path,
-                model=self.whisper_model,
+                path_or_hf_repo=self.model_path,
                 **kwargs
             )
             return result
@@ -738,8 +1212,7 @@ class MLXLoader:
             if model_type == "whisper":
                 logger.info("Loading as Whisper model")
                 wrapper = MLXWhisperWrapper(model_path=model_path, config=config)
-                if not wrapper.load_whisper_model():
-                    raise RuntimeError("Failed to load Whisper model")
+                # MLX-Whisper models don't need pre-loading - they load on transcription
 
             elif model_type == "audio":
                 if "parakeet" in model_path.lower():
@@ -782,22 +1255,103 @@ class MLXLoader:
 
             elif model_type == "embedding":
                 logger.info("Loading as embedding model")
-                try:
-                    model, tokenizer = load(model_path)
-                except Exception as e:
-                    logger.error(f"Failed to load embedding model via mlx-lm: {e}")
-                    raise
+                
+                # Try specialized embedding approaches in order of preference
+                
+                # 1. For MiniLM models, use specialized mlx_embeddings wrapper
+                if "minilm" in model_path.lower():
+                    logger.info("Detected MiniLM embedding model, using mlx_embeddings")
+                    try:
+                        wrapper = MLXMiniLMWrapper(model_path=model_path, config=config)
+                        wrapper.load_embedding_model()
+                        logger.info("Successfully loaded MiniLM embedding model via mlx_embeddings")
+                    except Exception as e:
+                        logger.error(f"Failed to load MiniLM embedding model: {e}")
+                        raise
+                
+                # 2. For BGE models, try mlx_embedding_models (most reliable)
+                elif "bge" in model_path.lower():
+                    logger.info("Detected BGE embedding model, using mlx_embedding_models")
+                    try:
+                        wrapper = MLXEmbeddingWrapper(model_path=model_path, config=config)
+                        wrapper.load_embedding_model()
+                        logger.info("Successfully loaded BGE embedding model via mlx_embedding_models")
+                    except Exception as e:
+                        logger.error(f"Failed to load BGE embedding model: {e}")
+                        raise
+                
+                # 2. Special handling for Arctic models (XLM-RoBERTa)
+                elif "arctic" in model_path.lower():
+                    logger.info("Detected Arctic model, trying sentence-transformers bypass")
+                    try:
+                        wrapper = MLXSentenceTransformerWrapper(model_path=model_path, config=config)
+                        logger.info("Successfully loaded Arctic model via sentence-transformers")
+                    except Exception as e:
+                        logger.warning(f"Failed to load Arctic model with sentence-transformers: {e}")
+                        # Fallback to universal wrapper
+                        try:
+                            wrapper = MLXUniversalEmbeddingWrapper(model_path=model_path, config=config)
+                            logger.info("Successfully loaded Arctic model via universal wrapper")
+                        except Exception as universal_e:
+                            logger.error(f"Failed to load Arctic model with universal wrapper: {universal_e}")
+                            raise
+                
+                # 3. For other known architectures, try universal wrapper
+                elif any(arch in model_path.lower() for arch in ["qwen", "gte", "modernbert", "e5", "minilm"]):
+                    logger.info("Detected custom architecture embedding model, using universal wrapper")
+                    try:
+                        wrapper = MLXUniversalEmbeddingWrapper(model_path=model_path, config=config)
+                        logger.info("Successfully loaded embedding model via universal wrapper")
+                    except Exception as e:
+                        logger.warning(f"Failed to load with universal wrapper, trying fallback: {e}")
+                        # Fallback to Qwen3 wrapper for Qwen models
+                        if "qwen3" in model_path.lower() and "embedding" in model_path.lower():
+                            try:
+                                wrapper = MLXQwen3EmbeddingWrapper(model_path=model_path, config=config)
+                                logger.info("Successfully loaded Qwen3 embedding model via legacy wrapper")
+                            except Exception as qwen_e:
+                                logger.error(f"Failed to load Qwen3 embedding model: {qwen_e}")
+                                raise
+                        else:
+                            raise
+                
+                # 3. Try mlx_embedding_models for unknown models
+                else:
+                    logger.info("Unknown embedding model, trying mlx_embedding_models")
+                    try:
+                        wrapper = MLXEmbeddingWrapper(model_path=model_path, config=config)
+                        wrapper.load_embedding_model()
+                        logger.info("Successfully loaded embedding model via mlx_embedding_models")
+                    except Exception as e:
+                        # 4. Final fallback: universal wrapper
+                        logger.warning(f"Failed to load with mlx_embedding_models, trying universal wrapper: {e}")
+                        try:
+                            wrapper = MLXUniversalEmbeddingWrapper(model_path=model_path, config=config)
+                            logger.info("Successfully loaded embedding model via universal wrapper fallback")
+                        except Exception as universal_e:
+                            # 5. Last resort: standard MLX-LM (will produce logits, not embeddings)
+                            logger.warning(f"Failed to load with universal wrapper, trying standard mlx-lm: {universal_e}")
+                            try:
+                                model, tokenizer = load(model_path)
+                                wrapper = MLXModelWrapper(
+                                    model=model,
+                                    tokenizer=tokenizer,
+                                    model_path=model_path,
+                                    config=config
+                                )
+                                logger.warning("Loaded embedding model via standard mlx-lm (may produce logits instead of embeddings)")
+                            except Exception as fallback_e:
+                                if "not supported" in str(fallback_e).lower():
+                                    logger.warning(f"Model architecture not supported by mlx-lm, treating as text model: {fallback_e}")
+                                    model_type = "text"
+                                else:
+                                    logger.error(f"Failed to load embedding model with all methods: {fallback_e}")
+                                    raise
+                # If model_type changed to "text", fall through to standard text loading
 
-                wrapper = MLXModelWrapper(
-                    model=model,
-                    tokenizer=tokenizer,
-                    model_path=model_path,
-                    config=config
-                )
-
-            else:
-                # Standard text generation model
-                logger.info("Loading as text generation model")
+            if model_type == "text":  # Handle both original text models and embedding fallbacks
+                # Standard text generation model (or embedding model treated as text)
+                logger.info(f"Loading as text generation model")
                 try:
                     model, tokenizer = load(model_path)
                 except KeyError as e:
@@ -813,6 +1367,12 @@ class MLXLoader:
                     model_path=model_path,
                     config=config
                 )
+                
+                # If this was originally an embedding model, preserve that information
+                original_model_type = self._detect_model_type(model_path)
+                if original_model_type == "embedding":
+                    wrapper.model_type = "embedding"
+                    logger.info("Preserving embedding model type for BERT-based model loaded as text")
 
             logger.info(f"Successfully loaded {model_type} model from {model_path}")
             logger.info(f"Estimated memory usage: {memory_usage:.1f}GB")
@@ -836,8 +1396,8 @@ class MLXLoader:
         if any(keyword in path_lower for keyword in ["parakeet", "speech", "stt", "asr", "tdt"]):
             return "audio"
 
-        # Embedding models
-        if "embedding" in path_lower or path_lower.endswith("-emb"):
+        # Embedding models - includes BGE, BERT-based models
+        if any(keyword in path_lower for keyword in ["embedding", "bge-", "e5-", "all-minilm", "sentence", "bert", "arctic-embed"]):
             return "embedding"
 
         # Vision/multimodal models - includes Gemma 3 vision variants
@@ -865,6 +1425,8 @@ class MLXLoader:
                         return "audio"
                     if any(keyword in arch_str for keyword in ["vision", "vlm", "multimodal", "llava", "qwen2vl", "idefics"]):
                         return "vision"
+                    if any(keyword in arch_str for keyword in ["bert", "embedding", "bge"]):
+                        return "embedding"
 
                 # Check model type field
                 model_type_field = config.get("model_type", "").lower()
@@ -886,11 +1448,14 @@ class MLXLoader:
     def load_from_hub(self, model_id: str, token: Optional[str] = None) -> MLXModelWrapper:
         """Load a model directly from HuggingFace Hub."""
         try:
-            # Check if model is MLX compatible
+            # Check if model is MLX compatible (with special handling for Arctic models)
             hf_client = get_huggingface_client(token)
             model_info = hf_client.get_model_details(model_id)
 
-            if not model_info or not model_info.mlx_compatible:
+            # Allow Arctic models to bypass MLX compatibility check since we have custom handling
+            is_arctic_model = "arctic" in model_id.lower()
+            
+            if not model_info or (not model_info.mlx_compatible and not is_arctic_model):
                 raise ValueError(f"Model {model_id} is not MLX compatible")
 
             # Use MLX repo if available

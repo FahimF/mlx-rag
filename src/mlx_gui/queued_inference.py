@@ -400,13 +400,23 @@ async def queued_generate_embeddings(
             logger.error(f"Error updating embeddings model usage: {e}")
 
         # Ensure result is in expected format
+        logger.debug(f"Embedding result type: {type(result)}")
         if isinstance(result, list):
             return {
                 "embeddings": result,
                 "prompt_tokens": sum(len(text.split()) for text in texts),
                 "total_tokens": sum(len(text.split()) for text in texts)
             }
+        elif hasattr(result, 'tolist'):
+            # Handle numpy arrays or MLX arrays
+            result_list = result.tolist()
+            return {
+                "embeddings": result_list,
+                "prompt_tokens": sum(len(text.split()) for text in texts),
+                "total_tokens": sum(len(text.split()) for text in texts)
+            }
         else:
+            # Assume it's already a dict-like result
             return result
 
     # Model is busy, use queue
