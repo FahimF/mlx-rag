@@ -23,6 +23,27 @@
 
 >*TLDR - OpenRouter-style v1 API interface for MLX with Ollama-like model management, featuring auto-queuing, on-demand model loading, and multi-user serving capabilities via single mac app.*
 
+## 🚀 Apps using MLX-GUI
+
+### 🎤 MLX-Transcribe - Lightning-Fast Voice Transcription
+
+<div align="center">
+<img src="https://github.com/RamboRogers/MLX-Transcribe/blob/master/media/trayapp.png?raw=true" width="400">
+</div>
+
+**[MLX-Transcribe](https://github.com/RamboRogers/MLX-Transcribe)** is a native macOS transcription app that transforms your voice into text instantly at your cursor position. Built with Apple Silicon optimization and seamless MLX-GUI integration, it delivers privacy-first, lightning-fast transcription.
+
+**Key Features:**
+- ⚡ **Instant Transcription** - Press `Control + ~` and speak - text appears instantly at your cursor
+- 🤖 **MLX-GUI Integration** - Seamless local AI processing with automatic Parakeet model management
+- 🛡️ **Privacy First** - Your voice never leaves your machine with local processing
+- 🎯 **Universal Cursor** - Works in any app - editors, browsers, chat apps, terminals
+- 🚀 **Native Menu Bar** - Lightweight, always-accessible macOS integration
+
+*Perfect companion to MLX-GUI for developers, writers, and anyone who values speed and privacy in voice-to-text workflows.*
+
+---
+
 ## 📦 Latest Release
 
 ### 🎉 v1.2.4 - Universal AI Ecosystem (July 22 2025)
