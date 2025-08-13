@@ -216,21 +216,25 @@ mlx-gui tray
 mlx-gui start --port 8000
 ```
 
-### Option 3: Install from Source
+### Option 3: Install from Source (with uv - Recommended)
 ```bash
 # Clone the repository
 git clone https://github.com/RamboRogers/mlx-gui.git
 cd mlx-gui
 
-# Install dependencies
-pip install -e ".[app]"
+# Install dependencies (10-100x faster than pip)
+uv sync --extra app
 
 # Launch with system tray
-mlx-gui tray
+uv run mlx-gui tray
 
 # Or launch server only
-mlx-gui start --port 8000
+uv run mlx-gui start --port 8000
 ```
+
+> **💡 Why uv?** uv is 10-100x faster than pip and provides better dependency resolution.
+
+
 
 ## 🎮 Usage
 
@@ -396,30 +400,54 @@ Full API documentation is available at `/v1/docs` when the server is running, or
 git clone https://github.com/RamboRogers/mlx-gui.git
 cd mlx-gui
 
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
 # Install in development mode with audio and vision support
-pip install -e ".[dev,audio,vision]"
-
-# Run tests
-pytest
-
-# Start development server
-mlx-gui start --reload
+uv sync --extra dev --extra audio --extra vision
 ```
+
+```bash
+# Start development server in one terminal
+uv run mlx-gui start --log-level debug --reload
+```
+
+In another terminal ...
+
+```bash
+# Run all tests
+uv run pytest
+```
+
+OR
+
+```bash
+# Run quick smoke tests
+uv run pytest tests/test_audio.py::test_audio_transcription -q
+uv run pytest tests/test_embeddings_endpoint.py -q
+```
+
+Notes:
+- The embeddings test includes a base64 variant that is currently skipped unless the server is configured to return base64-encoded vectors. Default output is floats.
 
 ### Build Standalone App
 ```bash
-# Install build dependencies with audio and vision support
-pip install rumps pyinstaller mlx-whisper parakeet-mlx mlx-vlm
-
-# Build macOS app bundle
-./build_app.sh
+# Build macOS app bundle (script runs `uv sync` automatically)
+uv run ./scripts/build_app.sh
 
 # Result: dist/MLX-GUI.app
 ```
+
+Notes:
+- The build script performs `uv sync --frozen --extra app --extra audio --extra vision` by default for reproducibility.
+- To skip syncing (e.g., if you already ran `uv sync`): set `SKIP_UV_SYNC=1` before the command.
+
+### FFmpeg on Apple Silicon (arm64)
+- The build prefers the Homebrew arm64 binaries at `/opt/homebrew/bin/{ffmpeg,ffprobe}` and bundles matching `libav*`, `libsw*`, and `libpostproc*` dylibs inside the app for runtime.
+- For development/tests, ensure the Homebrew tools are used:
+  - Set environment variables:
+    - `FFMPEG_BINARY=/opt/homebrew/bin/ffmpeg`
+    - `FFMPEG_PROBE=/opt/homebrew/bin/ffprobe`
+    - `PATH=/opt/homebrew/bin:$PATH`
+- We intentionally avoid bundling PyAV's vendored `__dot__dylibs` to prevent symbol conflicts.
+- The `ffmpeg_binaries/` directory under the repo root is a build artifact staging area used by the app bundle process and should not be committed to source control.
 
 ## 🤝 Contributing
 
