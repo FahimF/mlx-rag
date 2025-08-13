@@ -429,14 +429,15 @@ Notes:
 
 ### Build Standalone App
 ```bash
-# Install build dependencies with audio and vision support
-uv sync --extra app --extra audio --extra vision
-
-# Build macOS app bundle
+# Build macOS app bundle (script runs `uv sync` automatically)
 uv run ./scripts/build_app.sh
 
 # Result: dist/MLX-GUI.app
 ```
+
+Notes:
+- The build script performs `uv sync --frozen --extra app --extra audio --extra vision` by default for reproducibility.
+- To skip syncing (e.g., if you already ran `uv sync`): set `SKIP_UV_SYNC=1` before the command.
 
 ### FFmpeg on Apple Silicon (arm64)
 - The build prefers the Homebrew arm64 binaries at `/opt/homebrew/bin/{ffmpeg,ffprobe}` and bundles matching `libav*`, `libsw*`, and `libpostproc*` dylibs inside the app for runtime.

@@ -17,6 +17,22 @@ fi
 echo "📦 Using UV environment..."
 # UV manages the environment automatically
 
+# Ensure dependencies are synced (prefer frozen for reproducibility)
+if [ -n "${SKIP_UV_SYNC:-}" ]; then
+    echo "⏭️  Skipping uv sync (SKIP_UV_SYNC=1)"
+else
+    echo "🔄 Syncing dependencies with uv (extras: app, audio, vision)..."
+    if uv sync --frozen --extra app --extra audio --extra vision; then
+        echo "✅ uv sync (frozen) complete"
+    else
+        echo "⚠️  uv sync --frozen failed; attempting non-frozen sync"
+        uv sync --extra app --extra audio --extra vision
+    fi
+fi
+
+# Avoid re-syncs during subsequent uv run calls in this script
+export UV_NO_SYNC=1
+
 # Ensure PyInstaller is available (should be installed via uv sync --extra app)
 echo "📦 Verifying PyInstaller with UV..."
 if ! uv run pyinstaller --version > /dev/null 2>&1; then
@@ -25,34 +41,22 @@ if ! uv run pyinstaller --version > /dev/null 2>&1; then
 fi
 echo "✅ PyInstaller available via UV"
 
-# Check for critical dependencies
-echo "🔍 Checking critical dependencies..."
-# Include tokenizer stack explicitly to avoid AutoTokenizer runtime failures
-CRITICAL_DEPS=("mlx-lm" "mlx" "rumps" "fastapi" "uvicorn" "transformers" "tokenizers" "sentencepiece" "huggingface-hub" "mlx-whisper" "parakeet-mlx" "mlx-vlm" "timm" "torchvision")
-MISSING_DEPS=""
-
-for dep in "${CRITICAL_DEPS[@]}"; do
-    if ! uv run python -c "import ${dep//-/_}" > /dev/null 2>&1; then
-        MISSING_DEPS="$MISSING_DEPS $dep"
-    fi
-done
-
-if [ -n "$MISSING_DEPS" ]; then
-    echo "❌ Missing critical dependencies:$MISSING_DEPS"
-    echo "💡 Install with: uv sync --extra app --extra audio --extra vision"
-    echo "💡 Or add missing packages: uv add $MISSING_DEPS"
+# Environment consistency check (optional): verify dependency graph
+if ! uv pip check | cat; then
+    echo "❌ Dependency conflicts detected. Try: uv sync --upgrade"
     exit 1
 fi
 
-echo "✅ All critical dependencies found"
-
-# Show key MLX library versions for troubleshooting
+# Show key MLX library versions for troubleshooting (fast, no heavy imports)
 echo "📋 Key MLX library versions:"
-uv run python -c "
-import mlx_lm, mlx_vlm
-print(f'mlx-lm: {mlx_lm.__version__ if hasattr(mlx_lm, \"__version__\") else \"unknown\"}')
-print(f'mlx-vlm: {mlx_vlm.__version__ if hasattr(mlx_vlm, \"__version__\") else \"unknown\"}')
-"
+uv run python - <<'PY'
+from importlib.metadata import version, PackageNotFoundError
+for name in ['mlx-lm', 'mlx-vlm']:
+    try:
+        print(f"{name}: {version(name)}")
+    except PackageNotFoundError:
+        print(f"{name}: unknown")
+PY
 
 # Audio and vision dependencies should be managed by uv.lock
 echo "📦 Audio and vision dependencies managed by UV lock file..."
