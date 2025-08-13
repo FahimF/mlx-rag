@@ -534,7 +534,10 @@ class ModelManager:
             # Force garbage collection and clear MLX cache
             import gc
             gc.collect()
-            mx.metal.clear_cache()
+            try:
+                mx.clear_cache()
+            except AttributeError:
+                mx.metal.clear_cache()
             logger.info(f"✅ Memory freed by unloading '{lru_model_name}'")
 
         return success

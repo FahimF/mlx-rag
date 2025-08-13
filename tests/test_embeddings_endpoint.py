@@ -12,11 +12,62 @@ import sys
 import time
 
 
+BASE_URL = "http://localhost:8000"
+DEFAULT_MODEL_NAME = "qwen3-embedding-0-6b-4bit-dwq"
+DEFAULT_MODEL_ID = "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
+
+
+def _ensure_model_installed(base_url: str, model_name: str, model_id: str) -> None:
+    """Install the model if it's not present in the DB."""
+    # Check if model exists
+    r = requests.get(f"{base_url}/v1/models/{model_name}")
+    if r.status_code == 200:
+        return
+    # Try to install
+    payload = {"model_id": model_id, "name": model_name}
+    requests.post(f"{base_url}/v1/models/install", json=payload, timeout=120)
+
+
+def _load_and_wait_ready(base_url: str, model_name: str, timeout_s: int = 180) -> bool:
+    """Request load then poll health until loaded or timeout."""
+    # Kick off load (ignore result if already loaded)
+    try:
+        requests.post(f"{base_url}/v1/models/{model_name}/load", timeout=10)
+    except requests.RequestException:
+        pass
+
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            resp = requests.get(f"{base_url}/v1/models/{model_name}/health", timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("healthy"):
+                    return True
+        except requests.RequestException:
+            pass
+        time.sleep(2)
+    return False
+
+
+def _post_with_retry(url: str, *, json_body: dict, headers: dict | None = None, attempts: int = 5, backoff_s: float = 1.5):
+    last = None
+    for i in range(attempts):
+        last = requests.post(url, json=json_body, headers=headers or {"Content-Type": "application/json"}, timeout=120)
+        if last.status_code != 503:
+            return last
+        # Model is still loading – wait and retry
+        time.sleep(backoff_s * (i + 1))
+    return last
+
+
 def test_embeddings_endpoint():
     """Test the embeddings endpoint with a sample request."""
     
     # Base URL for the API
-    BASE_URL = "http://localhost:8000"
+    # Ensure the model is installed and ready to avoid flakiness
+    _ensure_model_installed(BASE_URL, DEFAULT_MODEL_NAME, DEFAULT_MODEL_ID)
+    assert _load_and_wait_ready(BASE_URL, DEFAULT_MODEL_NAME, timeout_s=180), "Embedding model failed to become ready in time"
     
     # Test data
     test_data = {
@@ -25,7 +76,7 @@ def test_embeddings_endpoint():
             "I am fine, thank you!",
             "This is a test of the embedding endpoint."
         ],
-        "model": "qwen3-embedding-0-6b-4bit-dwq",  # Example: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
+        "model": DEFAULT_MODEL_NAME,
         "encoding_format": "float"
     }
     
@@ -51,11 +102,12 @@ def test_embeddings_endpoint():
     
     try:
         start_time = time.time()
-        response = requests.post(
+        response = _post_with_retry(
             f"{BASE_URL}/v1/embeddings",
-            json=test_data,
+            json_body=test_data,
             headers={"Content-Type": "application/json"},
-            timeout=60  # 1 minute timeout
+            attempts=5,
+            backoff_s=1.5,
         )
         end_time = time.time()
         
@@ -110,9 +162,8 @@ def test_embeddings_endpoint():
             assert False, f"Model '{test_data['model']}' not found"
             
         elif response.status_code == 503:
-            print("❌ Service unavailable - model may be loading")
-            print("   Try again in a few moments")
-            assert False, "Service unavailable - model may be loading"
+            print("❌ Service unavailable after retries - model may still be loading")
+            assert False, "Service unavailable after retries"
             
         else:
             print(f"❌ Request failed with status {response.status_code}")
@@ -139,7 +190,9 @@ def test_embeddings_endpoint():
 def test_embeddings_with_base64():
     """Test embeddings with base64 encoding format."""
     
-    BASE_URL = "http://localhost:8000"
+    # Ensure the model is installed and ready to avoid flakiness
+    _ensure_model_installed(BASE_URL, DEFAULT_MODEL_NAME, DEFAULT_MODEL_ID)
+    assert _load_and_wait_ready(BASE_URL, DEFAULT_MODEL_NAME, timeout_s=180), "Embedding model failed to become ready in time"
     
     test_data = {
         "input": "This is a test with base64 encoding.",
@@ -150,11 +203,12 @@ def test_embeddings_with_base64():
     print("\n📋 Testing embeddings with base64 encoding...")
     
     try:
-        response = requests.post(
+        response = _post_with_retry(
             f"{BASE_URL}/v1/embeddings",
-            json=test_data,
+            json_body=test_data,
             headers={"Content-Type": "application/json"},
-            timeout=60
+            attempts=5,
+            backoff_s=1.5,
         )
         
         if response.status_code == 200:

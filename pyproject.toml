@@ -73,6 +73,10 @@ app = [
     "pyinstaller>=6.0.0",
     "rumps>=0.4.0",
     "pillow>=10.0.0",
+    # Required by transformers AutoTokenizer at runtime
+    "transformers>=4.53.1",
+    "tokenizers>=0.21.0",
+    "sentencepiece>=0.2.0",
 ]
 
 audio = [
@@ -83,6 +87,10 @@ audio = [
 vision = [
     "mlx-vlm>=0.1.0",
     "pillow>=10.0.0",
+    # Ensure tokenizer stack is available for processors/AutoTokenizer
+    "transformers>=4.53.1",
+    "tokenizers>=0.21.0",
+    "sentencepiece>=0.2.0",
 ]
 
 [project.scripts]

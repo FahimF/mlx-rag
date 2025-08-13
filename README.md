@@ -412,6 +412,20 @@ uv run pytest
 uv run mlx-gui start --reload
 ```
 
+#### Smoke tests (fast)
+```bash
+# Start a local server (in one terminal)
+# Prefer Homebrew ffmpeg/ffprobe by putting them first on PATH
+PATH=/opt/homebrew/bin:$PATH \
+uv run python -m mlx_gui.cli start --host 127.0.0.1 --port 8000 --log-level warning
+
+# In another terminal, run quick tests
+uv run pytest tests/test_audio.py::test_audio_transcription -q
+uv run pytest tests/test_embeddings_endpoint.py -q
+```
+Notes:
+- The embeddings test includes a base64 variant that is currently skipped unless the server is configured to return base64-encoded vectors. Default output is floats.
+
 #### Build Standalone App
 ```bash
 # Install build dependencies with audio and vision support
@@ -423,8 +437,15 @@ uv run ./scripts/build_app.sh
 # Result: dist/MLX-GUI.app
 ```
 
-
-
+#### FFmpeg on Apple Silicon (arm64)
+- The build prefers the Homebrew arm64 binaries at `/opt/homebrew/bin/{ffmpeg,ffprobe}` and bundles matching `libav*`, `libsw*`, and `libpostproc*` dylibs inside the app for runtime.
+- For development/tests, ensure the Homebrew tools are used:
+  - Set environment variables:
+    - `FFMPEG_BINARY=/opt/homebrew/bin/ffmpeg`
+    - `FFMPEG_PROBE=/opt/homebrew/bin/ffprobe`
+    - `PATH=/opt/homebrew/bin:$PATH`
+- We intentionally avoid bundling PyAV's vendored `__dot__dylibs` to prevent symbol conflicts.
+- The `ffmpeg_binaries/` directory under the repo root is a build artifact staging area used by the app bundle process and should not be committed to source control.
 
 ## 🤝 Contributing
 

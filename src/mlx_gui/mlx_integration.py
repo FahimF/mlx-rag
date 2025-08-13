@@ -54,8 +54,16 @@ except ImportError:
 try:
     import mlx_vlm
     HAS_MLX_VLM = True
-except ImportError:
+except Exception as e:  # broader than ImportError; transformers/metadata issues surface here
     HAS_MLX_VLM = False
+    # Defer heavy logging until logger is configured; store a bootstrap message
+    try:
+        import logging as _bootstrap_logging
+        _bootstrap_logging.getLogger(__name__).warning(
+            "mlx-vlm unavailable: %s. Vision/multimodal models will be disabled.", str(e)
+        )
+    except Exception:
+        pass
 
 from mlx_gui.huggingface_integration import get_huggingface_client
 
@@ -1551,7 +1559,10 @@ class MLXInferenceEngine:
             gc.collect()
 
             # Clear MLX memory
-            mx.metal.clear_cache()
+            try:
+                mx.clear_cache()
+            except AttributeError:
+                mx.metal.clear_cache()
 
             logger.info(f"Unloaded model {model_name}")
 
@@ -1693,9 +1704,9 @@ def _patch_mlx_vlm_bias():
         vlm_utils.sanitize_weights = _patched_sanitize
         vlm_utils.__bias_patch_applied = True
         logger.info("Applied Gemma VLM bias patch (development mode, robust)")
-    except ImportError:
-        # mlx_vlm not available yet – skip
-        pass
+    except Exception as e:
+        # mlx_vLM may be missing or partially importable; don't crash app startup
+        logger.debug(f"VLM bias patch skipped: {e}")
 
 # Apply patch immediately on module import
 _patch_mlx_vlm_bias()

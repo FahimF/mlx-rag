@@ -1317,9 +1317,15 @@ Currently, no rate limiting is implemented. HuggingFace API calls may be rate-li
 
 ## Environment Variables
 
+### Production and Development
 - `HF_TOKEN` or `HUGGINGFACE_HUB_TOKEN`: HuggingFace token for enhanced model discovery
 - `MLX_GUI_PORT`: Server port (default: 8000)
 - `MLX_GUI_HOST`: Server host (default: 127.0.0.1)
+  - Note: The bundled app auto-detects and configures ffmpeg/ffprobe internally; no ffmpeg-related env vars are required in production builds.
+
+### Development and CI
+- `PATH`: For development/tests, put Homebrew first to prefer arm64 tools (e.g., `PATH=/opt/homebrew/bin:$PATH`).
+- `FFMPEG_BINARY` and `FFMPEG_PROBE` are optional overrides. The app build and runtime auto-detect ffmpeg/ffprobe; set these only if you need to force a specific binary.
 
 ---
 

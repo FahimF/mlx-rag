@@ -27,7 +27,8 @@ echo "✅ PyInstaller available via UV"
 
 # Check for critical dependencies
 echo "🔍 Checking critical dependencies..."
-CRITICAL_DEPS=("mlx-lm" "mlx" "rumps" "fastapi" "uvicorn" "transformers" "huggingface-hub" "mlx-whisper" "parakeet-mlx" "mlx-vlm" "timm" "torchvision")
+# Include tokenizer stack explicitly to avoid AutoTokenizer runtime failures
+CRITICAL_DEPS=("mlx-lm" "mlx" "rumps" "fastapi" "uvicorn" "transformers" "tokenizers" "sentencepiece" "huggingface-hub" "mlx-whisper" "parakeet-mlx" "mlx-vlm" "timm" "torchvision")
 MISSING_DEPS=""
 
 for dep in "${CRITICAL_DEPS[@]}"; do
@@ -58,16 +59,7 @@ echo "📦 Audio and vision dependencies managed by UV lock file..."
 echo "ℹ️  To update dependencies, use: uv sync --upgrade"
 
 # Initialize ffmpeg binaries to ensure they're downloaded
-echo "📦 Downloading FFmpeg binaries..."
-uv run python -c "
-import ffmpeg
-try:
-    ffmpeg.init()
-    print('✅ FFmpeg binaries downloaded successfully')
-except Exception as e:
-    print(f'⚠️ FFmpeg init failed: {e}')
-    print('FFmpeg will be downloaded at runtime')
-"
+echo "📦 Skipping ffmpeg-binaries download (using Homebrew ffmpeg instead)"
 
 # OpenCV should be managed by UV dependencies
 echo "📦 OpenCV managed by UV dependencies..."
@@ -172,19 +164,19 @@ EOF
 PYTHON_SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
 VENV_BIN_DIR=".venv/bin"
 
-# Try multiple possible ffmpeg locations
+# Try multiple possible ffmpeg locations (prefer Homebrew arm64 first)
 FFMPEG_PATHS=(
-    "$PYTHON_SITE_PACKAGES/ffmpeg/binaries/ffmpeg"
-    "$VENV_BIN_DIR/ffmpeg"
     "/opt/homebrew/bin/ffmpeg"
     "/usr/local/bin/ffmpeg"
+    "$VENV_BIN_DIR/ffmpeg"
+    "$PYTHON_SITE_PACKAGES/ffmpeg/binaries/ffmpeg"
 )
 
 FFPROBE_PATHS=(
-    "$PYTHON_SITE_PACKAGES/ffmpeg/binaries/ffprobe"
-    "$VENV_BIN_DIR/ffprobe"
     "/opt/homebrew/bin/ffprobe"
     "/usr/local/bin/ffprobe"
+    "$VENV_BIN_DIR/ffprobe"
+    "$PYTHON_SITE_PACKAGES/ffmpeg/binaries/ffprobe"
 )
 
 FFMPEG_BINARY=""
@@ -215,6 +207,27 @@ if [ -n "$FFMPEG_BINARY" ] && [ -n "$FFPROBE_BINARY" ]; then
     cp "$FFPROBE_BINARY" ./ffmpeg_binaries/ffprobe
     chmod +x ./ffmpeg_binaries/*
 
+    # If using Homebrew ffmpeg, copy matching libav* and libsw* dylibs so the binary can load them inside the bundle
+    if [[ "$FFMPEG_BINARY" == /opt/homebrew/bin/ffmpeg* ]] || [[ "$FFMPEG_BINARY" == /usr/local/bin/ffmpeg* ]]; then
+        echo "🔍 Collecting FFmpeg runtime libraries..."
+        COPIED=0
+        for libdir in \
+            "/opt/homebrew/opt/ffmpeg/lib" \
+            "/usr/local/opt/ffmpeg/lib"; do
+            if [ -d "$libdir" ]; then
+                for pattern in libav*.dylib libsw*.dylib libpostproc*.dylib; do
+                    for f in "$libdir"/$pattern; do
+                        if [ -f "$f" ]; then
+                            cp -f "$f" ./ffmpeg_binaries/
+                            COPIED=$((COPIED+1))
+                        fi
+                    done
+                done
+            fi
+        done
+        echo "📦 Copied $COPIED FFmpeg dylibs to ./ffmpeg_binaries/"
+    fi
+
     echo "📦 Copied FFmpeg binaries to ./ffmpeg_binaries/"
 else
     echo "❌ FFmpeg binaries not found in any expected location"
@@ -244,31 +257,10 @@ EOF
 
 # Create custom hook for av (PyAV)
 cat > hooks/hook-av.py << 'EOF'
-from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs
-
-datas, binaries, hiddenimports = collect_all('av')
-
-# Collect all av dynamic libraries (libav* dylibs)
-av_dylibs = collect_dynamic_libs('av')
-binaries.extend(av_dylibs)
-
-# Additional hidden imports for av
-hiddenimports += [
-    'av',
-    'av.audio',
-    'av.codec',
-    'av.container',
-    'av.format',
-    'av.stream',
-    'av.video',
-    'av.filter',
-    'av.packet',
-    'av.frame',
-    'av.plane',
-    'av.subtitles',
-    'av.logging',
-    'av.utils',
-]
+# Explicitly exclude PyAV from the frozen app to avoid bundling vendored FFmpeg dylibs
+datas = []
+binaries = []
+hiddenimports = []
 EOF
 
 # Create custom hook for mlx-whisper
@@ -343,18 +335,17 @@ import os
 # Collect everything from cv2 first
 datas, binaries, hiddenimports = collect_all('cv2')
 
-# Comprehensive list of SSL/crypto library patterns that MUST be excluded
+# Only exclude OpenSSL libraries to avoid conflicts with Python's _ssl.
+# DO NOT exclude mbedTLS (libmbedcrypto/libmbedtls/libmbedx509), which FFmpeg/librist may depend on.
 SSL_CONFLICT_PATTERNS = [
-    # Generic SSL patterns
-    'ssl', 'crypto', 'openssl',
-    # Version-specific patterns
+    # Version-specific OpenSSL patterns
     'libssl.1.1', 'libcrypto.1.1',
     'libssl.3', 'libcrypto.3',
     'libssl.1.0', 'libcrypto.1.0',
-    # Platform-specific patterns
-    'ssleay32', 'libeay32',  # Windows
-    'libssl.dylib', 'libcrypto.dylib',  # macOS generic
-    'libssl.so', 'libcrypto.so',  # Linux
+    # Generic OpenSSL library names across platforms
+    'libssl.dylib', 'libcrypto.dylib',  # macOS
+    'libssl.so', 'libcrypto.so',        # Linux
+    'ssleay32', 'libeay32',             # Windows legacy
 ]
 
 def is_ssl_library(file_path: str) -> bool:
@@ -403,36 +394,15 @@ print("🔍 OpenCV Hook: Filtering SSL conflicts from datas...")
 original_data_count = len(datas)
 datas = filter_ssl_conflicts(datas)
 
-# Platform-specific additional cleanup
-if is_darwin:
-    # On macOS, be extra aggressive about crypto libs
-    def is_macos_crypto(path):
-        basename = os.path.basename(path).lower()
-        return any(x in basename for x in ['.dylib']) and any(x in basename for x in ['crypto', 'ssl'])
+# No extra generic filtering by 'crypto' substrings; we only target OpenSSL names above.
 
-    binaries = [(src, dest) for src, dest in binaries if not is_macos_crypto(src)]
-    datas = [(src, dest) for src, dest in datas if not is_macos_crypto(src)]
-
-elif is_win:
-    # On Windows, exclude SSL DLLs
-    def is_windows_ssl(path):
-        basename = os.path.basename(path).lower()
-        return basename.endswith('.dll') and any(x in basename for x in ['ssl', 'crypto'])
-
-    binaries = [(src, dest) for src, dest in binaries if not is_windows_ssl(src)]
-
-# Essential hidden imports for OpenCV
+# Essential hidden imports for OpenCV (headless-friendly)
 hiddenimports += [
     'cv2',
     'cv2.cv2',
     'numpy',
-    # Core OpenCV modules that might be dynamically imported
     'cv2.typing',
-    'cv2.dnn',
-    'cv2.imgproc',
-    'cv2.imgcodecs',
-    'cv2.videoio',
-    'cv2.highgui'
+    'cv2.dnn'
 ]
 
 # Final validation
@@ -454,7 +424,6 @@ datas, binaries, hiddenimports = collect_all('mlx_vlm')
 # Additional hidden imports for mlx-vlm
 hiddenimports += [
     'mlx_vlm.generate',
-    'mlx_vlm.load',
     'mlx_vlm.utils',
     'mlx_vlm.prompt_utils',
     'mlx_vlm.models',
@@ -462,7 +431,7 @@ hiddenimports += [
     'mlx_vlm.models.gemma3n',
     'mlx_vlm.models.qwen2_vl',
     'mlx_vlm.models.llava',
-    'mlx_vlm.models.idefics',
+    'mlx_vlm.models.internvl_chat',
     'timm',
     'timm.models',
     'timm.models.vision_transformer',
@@ -541,17 +510,20 @@ try:
                 os.environ['PATH'] = f"{ffmpeg_dir}{os.pathsep}{os.environ.get('PATH', '')}"
                 # print("✅ FFmpeg binary (fallback) path configured.")
             else:
-                import ffmpeg
+                try:
+                    import ffmpeg  # type: ignore
+                except Exception:
+                    pass
                 print("⚠️ FFmpeg binary path not found in bundle.")
 
 
-        # Fix for av
-        av_dir = os.path.join(bundle_dir, 'av')
-        if os.path.exists(av_dir):
-            os.environ['AV_ROOT'] = av_dir
-            # print("✅ PyAV (av) libraries configured.")
-        else:
-            print("⚠️ PyAV (av) libraries not found in bundle.")
+        # Ensure dynamic loader can find bundled FFmpeg dylibs
+        ffmpeg_lib_dir = os.path.join(bundle_dir, 'ffmpeg')
+        existing = os.environ.get('DYLD_FALLBACK_LIBRARY_PATH', '')
+        os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = f"{ffmpeg_lib_dir}{os.pathsep}{existing}"
+        # Also set DYLD_LIBRARY_PATH for robustness in unsigned builds
+        existing2 = os.environ.get('DYLD_LIBRARY_PATH', '')
+        os.environ['DYLD_LIBRARY_PATH'] = f"{ffmpeg_lib_dir}{os.pathsep}{existing2}"
 
 except Exception as e:
     print(f"⚠️ Error in ffmpeg/av fix: {e}")
@@ -806,7 +778,6 @@ PYINSTALLER_CMD=(
     "--copy-metadata" "torchvision"
     "--copy-metadata" "sentencepiece"
     "--copy-metadata" "Pillow"
-    "--copy-metadata" "av"
     "--copy-metadata" "parakeet-mlx"
     "--copy-metadata" "mlx-vlm"
     "--copy-metadata" "mlx-lm"
@@ -834,7 +805,6 @@ PYINSTALLER_CMD=(
     "--add-data" "media:media"
     "--hidden-import" "scipy.sparse.csgraph._validation"
     "--hidden-import" "mlx._reprlib_fix"
-    "--hidden-import" "Jinja2"
     "--hidden-import" "jinja2"
     "--hidden-import" "MarkupSafe"
     "--hidden-import" "mlx_lm"
@@ -855,9 +825,11 @@ PYINSTALLER_CMD=(
     "--exclude-module" "pyOpenSSL"
     # Exclude problematic PyTorch/Triton modules that cause TORCH_LIBRARY conflicts
     "--exclude-module" "torch.utils.cpp_extension"
+    "--exclude-module" "torch.utils.tensorboard"
     "--exclude-module" "triton"
     "--exclude-module" "torchvision.io"
     "--exclude-module" "torchvision.ops"
+    "--exclude-module" "av"
     # Exclude problematic binaries by pattern
     "--exclude" "*libcrypto*.dylib"
     "--exclude" "*libssl*.dylib"
@@ -900,17 +872,20 @@ def selective_ssl_filter(datas_or_binaries):
             filtered.append(item)
             continue
 
-        # Only exclude OpenCV's SSL libraries specifically
+        # Only exclude OpenCV's OpenSSL libraries specifically (keep mbedTLS) and drop PyAV's bundled libav* to avoid symbol clashes
         should_exclude = False
 
         # Check if this is from OpenCV's bundled libraries that cause conflicts
         if 'cv2' in src and ('libssl' in src or 'libcrypto' in src):
             should_exclude = True
-        # Also exclude mbedcrypto from OpenCV
-        elif 'cv2' in src and 'mbedcrypto' in src:
-            should_exclude = True
-        # Exclude general OpenCV SSL/crypto dylibs that end up in the wrong place
+        # Do NOT exclude mbedTLS family (libmbedcrypto/libmbedtls/libmbedx509)
+        # These are safe and needed by librist/ffmpeg.
+        # Exclude general OpenCV OpenSSL dylibs that end up in the wrong place
         elif src.endswith('__dot__dylibs/libssl.3.dylib') or src.endswith('__dot__dylibs/libcrypto.3.dylib'):
+            should_exclude = True
+
+        # Exclude PyAV's vendored FFmpeg dylibs to avoid conflicts with the Homebrew ffmpeg binary
+        if '/av/__dot__dylibs/' in src:
             should_exclude = True
 
         if should_exclude:
@@ -924,6 +899,7 @@ a = Analysis(
     ['src/mlx_gui/app_main.py'],
     pathex=[],
     binaries=[
+        # Bundle Homebrew ffmpeg/ffprobe only; avoid PyAV's libav* to prevent symbol clashes
         ('ffmpeg_binaries/ffmpeg', 'ffmpeg'),
         ('ffmpeg_binaries/ffprobe', 'ffprobe'),
     ],
@@ -949,7 +925,7 @@ a = Analysis(
     excludes=[
         'tkinter', 'PySide6', 'PyQt6', 'wx',
         'OpenSSL', 'pyOpenSSL',
-        'torch.utils.cpp_extension', 'triton',
+        'torch.utils.cpp_extension', 'triton', 'av',
         'torchvision.io', 'torchvision.ops'
     ],
     win_no_prefer_redirects=False,
