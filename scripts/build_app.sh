@@ -58,9 +58,6 @@ print(f'mlx-vlm: {mlx_vlm.__version__ if hasattr(mlx_vlm, \"__version__\") else 
 echo "📦 Audio and vision dependencies managed by UV lock file..."
 echo "ℹ️  To update dependencies, use: uv sync --upgrade"
 
-# Initialize ffmpeg binaries to ensure they're downloaded
-echo "📦 Skipping ffmpeg-binaries download (using Homebrew ffmpeg instead)"
-
 # OpenCV should be managed by UV dependencies
 echo "📦 OpenCV managed by UV dependencies..."
 uv run python -c "
@@ -160,82 +157,81 @@ hiddenimports += [
 ]
 EOF
 
-# Get FFmpeg binaries from current Python environment with flexible path detection
-PYTHON_SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
-VENV_BIN_DIR=".venv/bin"
-
-# Try multiple possible ffmpeg locations (prefer Homebrew arm64 first)
-FFMPEG_PATHS=(
-    "/opt/homebrew/bin/ffmpeg"
-    "/usr/local/bin/ffmpeg"
-    "$VENV_BIN_DIR/ffmpeg"
-    "$PYTHON_SITE_PACKAGES/ffmpeg/binaries/ffmpeg"
-)
-
-FFPROBE_PATHS=(
-    "/opt/homebrew/bin/ffprobe"
-    "/usr/local/bin/ffprobe"
-    "$VENV_BIN_DIR/ffprobe"
-    "$PYTHON_SITE_PACKAGES/ffmpeg/binaries/ffprobe"
-)
-
-FFMPEG_BINARY=""
-FFPROBE_BINARY=""
-
-# Find ffmpeg binary
-for path in "${FFMPEG_PATHS[@]}"; do
-    if [ -f "$path" ]; then
-        FFMPEG_BINARY="$path"
-        echo "✅ Found FFmpeg binary at: $FFMPEG_BINARY"
-        break
-    fi
-done
-
-# Find ffprobe binary
-for path in "${FFPROBE_PATHS[@]}"; do
-    if [ -f "$path" ]; then
-        FFPROBE_BINARY="$path"
-        echo "✅ Found FFprobe binary at: $FFPROBE_BINARY"
-        break
-    fi
-done
-
-if [ -n "$FFMPEG_BINARY" ] && [ -n "$FFPROBE_BINARY" ]; then
-    # Copy to project directory for PyInstaller to pick up
-    mkdir -p ./ffmpeg_binaries
-    cp "$FFMPEG_BINARY" ./ffmpeg_binaries/ffmpeg
-    cp "$FFPROBE_BINARY" ./ffmpeg_binaries/ffprobe
-    chmod +x ./ffmpeg_binaries/*
-
-    # If using Homebrew ffmpeg, copy matching libav* and libsw* dylibs so the binary can load them inside the bundle
-    if [[ "$FFMPEG_BINARY" == /opt/homebrew/bin/ffmpeg* ]] || [[ "$FFMPEG_BINARY" == /usr/local/bin/ffmpeg* ]]; then
-        echo "🔍 Collecting FFmpeg runtime libraries..."
-        COPIED=0
-        for libdir in \
-            "/opt/homebrew/opt/ffmpeg/lib" \
-            "/usr/local/opt/ffmpeg/lib"; do
-            if [ -d "$libdir" ]; then
-                for pattern in libav*.dylib libsw*.dylib libpostproc*.dylib; do
-                    for f in "$libdir"/$pattern; do
-                        if [ -f "$f" ]; then
-                            cp -f "$f" ./ffmpeg_binaries/
-                            COPIED=$((COPIED+1))
-                        fi
-                    done
-                done
-            fi
-        done
-        echo "📦 Copied $COPIED FFmpeg dylibs to ./ffmpeg_binaries/"
-    fi
-
-    echo "📦 Copied FFmpeg binaries to ./ffmpeg_binaries/"
+# Prefer existing project-local ffmpeg_binaries if present; otherwise fetch from Homebrew and copy libs
+FFMPEG_DIR="./ffmpeg_binaries"
+if [ -d "$FFMPEG_DIR" ] && [ -s "$FFMPEG_DIR/ffmpeg" ] && [ -s "$FFMPEG_DIR/ffprobe" ]; then
+    echo "✅ Using existing FFmpeg binaries from $FFMPEG_DIR"
+    chmod +x "$FFMPEG_DIR/ffmpeg" "$FFMPEG_DIR/ffprobe" 2>/dev/null || true
 else
-    echo "❌ FFmpeg binaries not found in any expected location"
-    echo "   Tried paths:"
+    # Only search Homebrew locations for ffmpeg/ffprobe
+    FFMPEG_PATHS=(
+        "/opt/homebrew/bin/ffmpeg"
+        "/usr/local/bin/ffmpeg"
+    )
+
+    FFPROBE_PATHS=(
+        "/opt/homebrew/bin/ffprobe"
+        "/usr/local/bin/ffprobe"
+    )
+
+    FFMPEG_BINARY=""
+    FFPROBE_BINARY=""
+
+    # Find ffmpeg binary
     for path in "${FFMPEG_PATHS[@]}"; do
-        echo "   - $path"
+        if [ -f "$path" ]; then
+            FFMPEG_BINARY="$path"
+            echo "✅ Found FFmpeg binary at: $FFMPEG_BINARY"
+            break
+        fi
     done
-    echo "⚠️ Audio transcription will not work"
+
+    # Find ffprobe binary
+    for path in "${FFPROBE_PATHS[@]}"; do
+        if [ -f "$path" ]; then
+            FFPROBE_BINARY="$path"
+            echo "✅ Found FFprobe binary at: $FFPROBE_BINARY"
+            break
+        fi
+    done
+
+    if [ -n "$FFMPEG_BINARY" ] && [ -n "$FFPROBE_BINARY" ]; then
+        # Copy to project directory for PyInstaller to pick up
+        mkdir -p "$FFMPEG_DIR"
+        cp "$FFMPEG_BINARY" "$FFMPEG_DIR/ffmpeg"
+        cp "$FFPROBE_BINARY" "$FFMPEG_DIR/ffprobe"
+        chmod +x "$FFMPEG_DIR"/*
+
+        # If using Homebrew ffmpeg, copy matching libav* and libsw* dylibs so the binary can load them inside the bundle
+        if [[ "$FFMPEG_BINARY" == /opt/homebrew/bin/ffmpeg* ]] || [[ "$FFMPEG_BINARY" == /usr/local/bin/ffmpeg* ]]; then
+            echo "🔍 Collecting FFmpeg runtime libraries..."
+            COPIED=0
+            for libdir in \
+                "/opt/homebrew/opt/ffmpeg/lib" \
+                "/usr/local/opt/ffmpeg/lib"; do
+                if [ -d "$libdir" ]; then
+                    for pattern in libav*.dylib libsw*.dylib libpostproc*.dylib; do
+                        for f in "$libdir"/$pattern; do
+                            if [ -f "$f" ]; then
+                                cp -f "$f" "$FFMPEG_DIR/"
+                                COPIED=$((COPIED+1))
+                            fi
+                        done
+                    done
+                fi
+            done
+            echo "📦 Copied $COPIED FFmpeg dylibs to $FFMPEG_DIR/"
+        fi
+
+        echo "📦 Copied FFmpeg binaries to $FFMPEG_DIR/"
+    else
+        echo "❌ FFmpeg binaries not found in any expected location"
+        echo "   Tried paths:"
+        for path in "${FFMPEG_PATHS[@]}"; do
+            echo "   - $path"
+        done
+        echo "⚠️ Audio transcription will not work"
+    fi
 fi
 
 # Create minimal hook for ffmpeg package data only (no binaries)

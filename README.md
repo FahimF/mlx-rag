@@ -395,38 +395,39 @@ Full API documentation is available at `/v1/docs` when the server is running, or
 
 ## 🛠️ Development
 
-### uv - Recommended
-
-#### Setup Development Environment
+### Setup Development Environment
 ```bash
 git clone https://github.com/RamboRogers/mlx-gui.git
 cd mlx-gui
 
 # Install in development mode with audio and vision support
 uv sync --extra dev --extra audio --extra vision
-
-# Run tests
-uv run pytest
-
-# Start development server
-uv run mlx-gui start --reload
 ```
 
-#### Smoke tests (fast)
 ```bash
-# Start a local server (in one terminal)
-# Prefer Homebrew ffmpeg/ffprobe by putting them first on PATH
-PATH=/opt/homebrew/bin:$PATH \
-uv run python -m mlx_gui.cli start --host 127.0.0.1 --port 8000 --log-level warning
+# Start development server in one terminal
+uv run mlx-gui start --log-level debug --reload
+```
 
-# In another terminal, run quick tests
+In another terminal ...
+
+```bash
+# Run all tests
+uv run pytest
+```
+
+OR
+
+```bash
+# Run quick smoke tests
 uv run pytest tests/test_audio.py::test_audio_transcription -q
 uv run pytest tests/test_embeddings_endpoint.py -q
 ```
+
 Notes:
 - The embeddings test includes a base64 variant that is currently skipped unless the server is configured to return base64-encoded vectors. Default output is floats.
 
-#### Build Standalone App
+### Build Standalone App
 ```bash
 # Install build dependencies with audio and vision support
 uv sync --extra app --extra audio --extra vision
@@ -437,7 +438,7 @@ uv run ./scripts/build_app.sh
 # Result: dist/MLX-GUI.app
 ```
 
-#### FFmpeg on Apple Silicon (arm64)
+### FFmpeg on Apple Silicon (arm64)
 - The build prefers the Homebrew arm64 binaries at `/opt/homebrew/bin/{ffmpeg,ffprobe}` and bundles matching `libav*`, `libsw*`, and `libpostproc*` dylibs inside the app for runtime.
 - For development/tests, ensure the Homebrew tools are used:
   - Set environment variables:

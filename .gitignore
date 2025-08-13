@@ -191,6 +191,7 @@ model_cache/
 downloads/
 logs/
 *.log
+ffmpeg_binaries/
 
 # HuggingFace cache
 .cache/
