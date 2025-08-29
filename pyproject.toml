@@ -47,6 +47,9 @@ dependencies = [
     "timm>=1.0.19",
     "torchvision>=0.22.1",
     "rumps>=0.4.0",
+    "chromadb>=0.4.24",
+    "tree-sitter>=0.21.0",
+    "tree-sitter-python>=0.20.4",
 ]
 
 [project.optional-dependencies]

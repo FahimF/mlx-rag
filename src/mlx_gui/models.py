@@ -46,6 +46,14 @@ class QueueStatus(Enum):
     FAILED = "failed"
 
 
+class RAGCollectionStatus(Enum):
+    UNINITIALIZED = "uninitialized"
+    PROCESSING = "processing"
+    READY = "ready"
+    ERROR = "error"
+
+
+
 class Model(Base):
     __tablename__ = "models"
 
@@ -292,3 +300,18 @@ Index("idx_inference_requests_created_at", InferenceRequest.created_at)
 Index("idx_system_metrics_timestamp", SystemMetrics.timestamp)
 Index("idx_request_queue_status", RequestQueue.status)
 Index("idx_request_queue_priority", RequestQueue.priority)
+
+
+class RAGCollection(Base):
+    __tablename__ = "rag_collections"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False, unique=True)
+    path = Column(String, nullable=False)
+    status = Column(String, nullable=False, default=RAGCollectionStatus.UNINITIALIZED.value)
+    is_active = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<RAGCollection(name='{self.name}', status='{self.status}', active={self.is_active})>"

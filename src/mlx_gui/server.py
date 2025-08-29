@@ -19,10 +19,11 @@ import os
 import uuid
 
 from mlx_gui.database import get_db_session, get_database_manager
-from mlx_gui.models import Model, AppSettings
+from mlx_gui.models import Model, AppSettings, RAGCollection
 from mlx_gui.system_monitor import get_system_monitor
 from mlx_gui.huggingface_integration import get_huggingface_client
 from mlx_gui.model_manager import get_model_manager
+from mlx_gui.rag_manager import get_rag_manager
 from mlx_gui.mlx_integration import GenerationConfig, get_inference_engine
 from mlx_gui.inference_queue_manager import get_inference_manager, QueuedRequest
 from mlx_gui.queued_inference import queued_generate_text, queued_generate_text_stream, queued_transcribe_audio, queued_generate_speech, queued_generate_embeddings, queued_generate_vision
@@ -594,6 +595,83 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(f"Error during model cache scan: {e}")
             raise HTTPException(status_code=500, detail="Error scanning model cache")
+
+    # RAG endpoints
+    @app.post("/v1/rag/collections")
+    async def create_rag_collection(name: str, path: str, db: Session = Depends(get_db_session)):
+        """Create a new RAG collection."""
+        try:
+            rag_manager = get_rag_manager()
+            rag_manager.create_collection(name, path)
+            return {"message": f"RAG collection '{name}' created successfully."}
+        except Exception as e:
+            logger.error(f"Error creating RAG collection: {e}")
+            raise HTTPException(status_code=500, detail="Error creating RAG collection")
+
+    @app.get("/v1/rag/collections")
+    async def list_rag_collections(db: Session = Depends(get_db_session)):
+        """List all RAG collections."""
+        collections = db.query(RAGCollection).all()
+        return {"collections": [
+            {
+                "id": col.id,
+                "name": col.name,
+                "path": col.path,
+                "status": col.status,
+                "is_active": col.is_active,
+            }
+            for col in collections
+        ]}
+
+    @app.post("/v1/rag/collections/{collection_name}/activate")
+    async def activate_rag_collection(collection_name: str, db: Session = Depends(get_db_session)):
+        """Activate a RAG collection."""
+        collection = db.query(RAGCollection).filter(RAGCollection.name == collection_name).first()
+        if not collection:
+            raise HTTPException(status_code=404, detail="RAG collection not found")
+
+        # Deactivate all other collections
+        db.query(RAGCollection).update({RAGCollection.is_active: False})
+        collection.is_active = True
+        db.commit()
+        return {"message": f"RAG collection '{collection_name}' activated."}
+
+    @app.delete("/v1/rag/collections/{collection_name}")
+    async def delete_rag_collection(collection_name: str, db: Session = Depends(get_db_session)):
+        """Delete a RAG collection."""
+        collection = db.query(RAGCollection).filter(RAGCollection.name == collection_name).first()
+        if not collection:
+            raise HTTPException(status_code=404, detail="RAG collection not found")
+
+        rag_manager = get_rag_manager()
+        rag_manager.delete_collection(collection_name)
+
+        db.delete(collection)
+        db.commit()
+        return {"message": f"RAG collection '{collection_name}' deleted."}
+
+    @app.post("/v1/rag/collections/{collection_name}/reprocess")
+    async def reprocess_rag_collection(collection_name: str, db: Session = Depends(get_db_session)):
+        """Reprocess a RAG collection."""
+        collection = db.query(RAGCollection).filter(RAGCollection.name == collection_name).first()
+        if not collection:
+            raise HTTPException(status_code=404, detail="RAG collection not found")
+
+        rag_manager = get_rag_manager()
+        rag_manager.reprocess_collection(collection_name)
+
+        return {"message": f"Reprocessing of RAG collection '{collection_name}' started."}
+
+    @app.post("/v1/rag/query")
+    async def query_rag(query: str, db: Session = Depends(get_db_session)):
+        """Query the active RAG collection."""
+        active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
+        if not active_collection:
+            raise HTTPException(status_code=400, detail="No active RAG collection")
+
+        rag_manager = get_rag_manager()
+        response = rag_manager.query(query, active_collection.name)
+        return {"query": query, "response": response}
 
     @app.get("/v1/models/{model_name}")
     async def get_model(model_name: str, db: Session = Depends(get_db_session)):
