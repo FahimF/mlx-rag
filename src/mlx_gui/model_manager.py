@@ -17,6 +17,10 @@ from typing import Dict, Optional, Any, List, Callable, AsyncGenerator, Tuple
 from concurrent.futures import ThreadPoolExecutor
 import threading
 
+from huggingface_hub import try_to_load_from_cache, HfApi
+from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
+from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
+
 import mlx.core as mx
 from sqlalchemy.orm import Session
 
@@ -24,6 +28,7 @@ from mlx_gui.database import get_database_manager, get_db_session
 from mlx_gui.models import Model, ModelStatus, InferenceRequest, RequestQueue, QueueStatus
 from mlx_gui.system_monitor import get_system_monitor
 from mlx_gui.mlx_integration import get_inference_engine, MLXModelWrapper, GenerationConfig, GenerationResult
+from mlx_gui.huggingface_integration import get_huggingface_client
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +174,9 @@ class ModelManager:
 
         # Don't start background workers immediately - start them lazily
 
+        # Scan for existing models in cache on startup
+        self.scan_and_register_cached_models()
+
     def _get_max_concurrent_models(self, default_value: int) -> int:
         """Get the max concurrent models from database settings."""
         try:
@@ -262,6 +270,58 @@ class ModelManager:
         # No need to explicitly wait for or kill them
         logger.info("Model manager cleanup completed")
 
+    def scan_and_register_cached_models(self):
+        """Scan the HuggingFace cache for existing models and register them if compatible."""
+        logger.info("Scanning HuggingFace cache for existing models...")
+        cache_dir = HUGGINGFACE_HUB_CACHE
+        if not os.path.isdir(cache_dir):
+            logger.info("HuggingFace cache directory not found.")
+            return
+
+        hf_client = get_huggingface_client()
+        db_manager = get_database_manager()
+
+        with db_manager.get_session() as session:
+            existing_model_ids = {model.huggingface_id for model in session.query(Model).all()}
+
+            for item in os.listdir(cache_dir):
+                if item.startswith("models--"):
+                    model_id = item.replace("models--", "").replace("--", "/")
+                    if model_id in existing_model_ids:
+                        continue
+
+                    try:
+                        model_info = hf_client.get_model_details(model_id)
+                        if model_info and model_info.mlx_compatible:
+                            logger.info(f"Found compatible model in cache: {model_id}")
+                            
+                            new_model = Model(
+                                name=model_info.name,
+                                path=model_info.id,
+                                model_type=model_info.model_type,
+                                huggingface_id=model_info.id,
+                                status=ModelStatus.UNLOADED.value,
+                                memory_required_gb=model_info.estimated_memory_gb or 2.0, # Default estimate
+                            )
+                            new_model.set_metadata({
+                                "author": model_info.author,
+                                "downloads": model_info.downloads,
+                                "likes": model_info.likes,
+                                "tags": model_info.tags,
+                                "description": model_info.description,
+                                "size_gb": model_info.size_gb,
+                                "mlx_repo_id": model_info.mlx_repo_id
+                            })
+                            session.add(new_model)
+                            session.commit()
+                            logger.info(f"Registered new model: {model_id}")
+
+                    except (RepositoryNotFoundError, GatedRepoError):
+                        continue
+                    except Exception as e:
+                        logger.error(f"Error processing cached model {model_id}: {e}")
+        logger.info("Finished scanning HuggingFace cache.")
+
     def _cleanup_inactive_models(self):
         """Unload models that have been inactive for too long."""
         cutoff_time = datetime.utcnow() - self._inactivity_timeout
@@ -344,31 +404,27 @@ class ModelManager:
             return 2.0
 
     def _resolve_model_path(self, model_path: str) -> str:
-        """Resolve model path to actual filesystem location."""
+        """Resolve model path to actual filesystem location, using HuggingFace cache if possible."""
         # If it's already a local path that exists, use it
         if os.path.exists(model_path):
             return model_path
 
-        # If it looks like a HuggingFace model ID, find it in cache
-        if "/" in model_path and not os.path.exists(model_path):
-            # Convert HF model ID to cache path
-            cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "mlx-gui")
-
-            # Convert model ID to cache directory name
-            # "lmstudio-community/DeepSeek-R1-0528-Qwen3-8B-MLX-4bit" -> "models--lmstudio-community--DeepSeek-R1-0528-Qwen3-8B-MLX-4bit"
-            cache_name = "models--" + model_path.replace("/", "--")
-            cache_path = os.path.join(cache_dir, cache_name)
-
-            if os.path.exists(cache_path):
-                # Find the actual model files in snapshots subdirectory
-                snapshots_dir = os.path.join(cache_path, "snapshots")
-                if os.path.exists(snapshots_dir):
-                    # Get the first (and usually only) snapshot directory
-                    snapshot_dirs = [d for d in os.listdir(snapshots_dir) if os.path.isdir(os.path.join(snapshots_dir, d))]
-                    if snapshot_dirs:
-                        actual_path = os.path.join(snapshots_dir, snapshot_dirs[0])
-                        logger.debug(f"Resolved HF model {model_path} to {actual_path}")
-                        return actual_path
+        # If it looks like a HuggingFace model ID, try to resolve it from the cache
+        if "/" in model_path:
+            try:
+                # Use huggingface_hub to resolve the path from cache
+                # This respects HF_HOME, etc.
+                cached_path = try_to_load_from_cache(
+                    repo_id=model_path,
+                    filename="config.json"  # Check for a common file
+                )
+                if cached_path:
+                    # The returned path is to a specific file, so we get the parent directory
+                    model_folder = os.path.dirname(cached_path)
+                    logger.debug(f"Resolved HF model {model_path} to cache path {model_folder}")
+                    return model_folder
+            except Exception as e:
+                logger.debug(f"Could not resolve {model_path} from HuggingFace cache: {e}")
 
         # Fallback: return original path
         return model_path

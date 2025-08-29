@@ -584,6 +584,17 @@ def create_app() -> FastAPI:
             ]
         }
 
+    @app.post("/v1/manager/models/rescan")
+    async def rescan_models():
+        """Rescan the HuggingFace cache for new models."""
+        try:
+            model_manager = get_model_manager()
+            model_manager.scan_and_register_cached_models()
+            return {"message": "Model cache scan completed."}
+        except Exception as e:
+            logger.error(f"Error during model cache scan: {e}")
+            raise HTTPException(status_code=500, detail="Error scanning model cache")
+
     @app.get("/v1/models/{model_name}")
     async def get_model(model_name: str, db: Session = Depends(get_db_session)):
         """Get specific model details."""

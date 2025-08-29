@@ -804,8 +804,11 @@
         async function refreshModels(silent = false) {
             try {
                 if (!silent) {
-                    showLoading('Loading models...');
+                    showLoading('Refreshing models...');
                 }
+                // First, trigger a rescan of the cache
+                await apiCall('/v1/manager/models/rescan', { method: 'POST' });
+
                 const response = await apiCall('/v1/manager/models');
                 currentModels = response.models || [];
                 renderModels();

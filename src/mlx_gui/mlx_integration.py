@@ -1060,8 +1060,11 @@ class MLXLoader:
     """Handles loading models with MLX-LM."""
 
     def __init__(self, cache_dir: Optional[str] = None):
-        self.cache_dir = cache_dir or os.path.join(os.path.expanduser("~"), ".cache", "mlx-gui")
-        os.makedirs(self.cache_dir, exist_ok=True)
+        # If cache_dir is not provided, it will be None, and snapshot_download
+        # will use the default Hugging Face cache (respecting HF_HOME, etc.)
+        self.cache_dir = cache_dir
+        if self.cache_dir:
+            os.makedirs(self.cache_dir, exist_ok=True)
 
     def download_model(self, model_id: str, token: Optional[str] = None) -> str:
         """Download model from HuggingFace Hub with progress tracking."""
