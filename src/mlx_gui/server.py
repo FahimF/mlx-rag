@@ -673,6 +673,51 @@ def create_app() -> FastAPI:
         response = rag_manager.query(query, active_collection.name)
         return {"query": query, "response": response}
 
+    @app.post("/v1/chat")
+    async def chat(request: dict, db: Session = Depends(get_db_session)):
+        """Handle a chat request."""
+        message = request.get("message")
+        model_name = request.get("model")
+        rag_collection_name = request.get("rag_collection")
+        history = request.get("history", [])
+
+        if not message or not model_name:
+            raise HTTPException(status_code=400, detail="Message and model are required.")
+
+        async def stream_response():
+            # Get the model
+            model_manager = get_model_manager()
+            language_model = model_manager.get_model_for_inference(model_name)
+            if not language_model:
+                yield f"Error: Model '{model_name}' not loaded."
+                return
+
+            # Get RAG context if a collection is selected
+            rag_context = ""
+            if rag_collection_name:
+                rag_manager = get_rag_manager()
+                rag_context = rag_manager.query(message, rag_collection_name)
+
+            # Construct the prompt
+            prompt = ""
+            if rag_context:
+                prompt += f"Context:\n{rag_context}\n\n"
+            
+            # Add history to prompt
+            for msg in history:
+                prompt += f"{msg['role']}: {msg['content']}\n"
+            
+            prompt += f"user: {message}\nassistant:"
+
+            # Generate the response
+            from mlx_gui.mlx_integration import GenerationConfig
+            config = GenerationConfig()
+            
+            async for chunk in language_model.mlx_wrapper.generate_stream(prompt, config):
+                yield chunk
+
+        return StreamingResponse(stream_response(), media_type="text/event-stream")
+
     @app.get("/v1/models/{model_name}")
     async def get_model(model_name: str, db: Session = Depends(get_db_session)):
         """Get specific model details."""

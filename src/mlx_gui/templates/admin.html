@@ -167,6 +167,9 @@
                     <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="rag">
                         <i class="fas fa-robot mr-2"></i>RAG
                     </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="chat">
+                        <i class="fas fa-comments mr-2"></i>Chat
+                    </button>
                 </nav>
             </div>
 
@@ -521,6 +524,40 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Chat Tab -->
+                <div id="chat-tab" class="tab-content hidden">
+                    <div class="flex h-full flex-col">
+                        <!-- Header -->
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-xl font-bold text-white">Chat</h2>
+                            <div class="flex items-center space-x-4">
+                                <select id="chat-model-select" class="px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-400 focus:outline-none">
+                                    <option value="">Select Model</option>
+                                </select>
+                                <select id="chat-rag-select" class="px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-400 focus:outline-none">
+                                    <option value="">No RAG</option>
+                                </select>
+                                <button onclick="newChat()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
+                                    <i class="fas fa-plus mr-2"></i>New Chat
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Chat History -->
+                        <div id="chat-history" class="flex-1 overflow-y-auto p-4 bg-gray-800 rounded-lg" style="height: 500px;">
+                            <!-- Messages will be appended here -->
+                        </div>
+
+                        <!-- Chat Input -->
+                        <div class="mt-4 flex items-center">
+                            <textarea id="chat-input" rows="1" class="flex-1 px-3 py-2 bg-gray-700 text-white rounded-l-lg border border-gray-600 focus:border-blue-400 focus:outline-none resize-none" placeholder="Type your message..."></textarea>
+                            <button onclick="sendMessage()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-r-lg">
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -637,6 +674,9 @@
                 loadSettings();
             } else if (tabName === 'rag') {
                 loadRagCollections();
+            } else if (tabName === 'chat') {
+                loadChatModels();
+                loadChatRagCollections();
             }
         }
 
@@ -1817,6 +1857,132 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // Chat functions
+        let chatHistory = [];
+
+        function newChat() {
+            chatHistory = [];
+            document.getElementById('chat-history').innerHTML = '';
+        }
+
+        async function loadChatModels() {
+            try {
+                const response = await apiCall('/v1/manager/models');
+                const models = response.models || [];
+                const loadedModels = models.filter(m => m.status === 'loaded' && (m.type === 'text' || m.type === 'multimodal'));
+                
+                const select = document.getElementById('chat-model-select');
+                
+                if (loadedModels.length === 0) {
+                    select.innerHTML = '<option value="">No loaded models available</option>';
+                    return;
+                }
+                
+                select.innerHTML = loadedModels.map(model => 
+                    `<option value="${model.name}">${model.name}</option>`
+                ).join('');
+                
+                if (loadedModels.length > 0) {
+                    select.value = loadedModels[0].name;
+                }
+            } catch (error) {
+                console.error('Failed to load chat models:', error);
+                document.getElementById('chat-model-select').innerHTML = '<option value="">Error loading models</option>';
+            }
+        }
+
+        async function loadChatRagCollections() {
+            try {
+                const response = await apiCall('/v1/rag/collections');
+                const collections = response.collections || [];
+                const select = document.getElementById('chat-rag-select');
+                
+                select.innerHTML = '<option value="">No RAG</option>' + collections.map(col => 
+                    `<option value="${col.name}">${col.name}</option>`
+                ).join('');
+            } catch (error) {
+                console.error('Failed to load RAG collections for chat:', error);
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('chat-input');
+            const message = input.value.trim();
+            if (!message) return;
+
+            const model = document.getElementById('chat-model-select').value;
+            const ragCollection = document.getElementById('chat-rag-select').value;
+
+            if (!model) {
+                showToast('Please select a model.', 'error');
+                return;
+            }
+
+            // Add user message to history
+            chatHistory.push({ role: 'user', content: message });
+            renderChatHistory();
+            input.value = '';
+
+            // Add placeholder for assistant response
+            chatHistory.push({ role: 'assistant', content: '<i class="fas fa-spinner fa-spin"></i>' });
+            renderChatHistory();
+
+            try {
+                const response = await fetch('/v1/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        model: model,
+                        rag_collection: ragCollection,
+                        history: chatHistory.slice(0, -1) // Don't include the placeholder
+                    })
+                });
+
+                if (!response.body) {
+                    throw new Error('No response body');
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let assistantResponse = '';
+                chatHistory.pop(); // Remove placeholder
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    assistantResponse += chunk;
+                    
+                    // Update the last message in history
+                    const lastMessage = chatHistory[chatHistory.length - 1];
+                    if (lastMessage && lastMessage.role === 'assistant') {
+                        lastMessage.content = assistantResponse;
+                    } else {
+                        chatHistory.push({ role: 'assistant', content: assistantResponse });
+                    }
+                    renderChatHistory();
+                }
+            } catch (error) {
+                console.error('Error sending message:', error);
+                showToast('Failed to get response from model.', 'error');
+                chatHistory.pop(); // Remove placeholder
+                chatHistory.push({ role: 'assistant', content: 'Error: Could not get response.' });
+                renderChatHistory();
+            }
+        }
+
+        function renderChatHistory() {
+            const container = document.getElementById('chat-history');
+            container.innerHTML = chatHistory.map(msg => `
+                <div class="p-4 rounded-lg ${msg.role === 'user' ? 'bg-gray-700' : 'bg-gray-800'}">
+                    <p class="text-white whitespace-pre-wrap">${msg.content}</p>
+                </div>
+            `).join('<div class="h-4"></div>');
+            container.scrollTop = container.scrollHeight;
         }
 
         // RAG functions
