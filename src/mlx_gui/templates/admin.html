@@ -41,6 +41,13 @@
             background-color: #3b82f6;
             animation: bounce 1s infinite;
         }
+        .status-processing {
+            background-color: #f59e0b;
+            animation: pulse 2s infinite;
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+        }
+        .status-ready { background-color: #10b981; }
+        .status-error { background-color: #ef4444; }
         @keyframes bounce {
             0%, 100% { transform: scale(1); }
             50% { transform: scale(1.2); }
@@ -493,7 +500,12 @@
 
                 <!-- RAG Tab -->
                 <div id="rag-tab" class="tab-content hidden">
-                    <h2 class="text-xl font-bold text-white mb-6">RAG Collections</h2>
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-xl font-bold text-white">RAG Collections</h2>
+                        <button onclick="refreshRagCollections()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
+                            <i class="fas fa-sync-alt mr-2"></i>Refresh
+                        </button>
+                    </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <!-- Create New Collection -->
                         <div class="bg-gray-800 rounded-lg p-6">
@@ -636,6 +648,8 @@
         let systemStatus = {};
         let progressPollingInterval = null;
         let loadingStartTime = null;
+        let ragRefreshInterval = null;
+        let currentRagCollections = [];
 
         // Tab switching
         document.querySelectorAll('.tab-button').forEach(button => {
@@ -646,6 +660,11 @@
         });
 
         function switchTab(tabName) {
+            // Stop RAG auto-refresh when switching away from RAG tab
+            if (ragRefreshInterval && tabName !== 'rag') {
+                stopRagAutoRefresh();
+            }
+            
             // Update tab buttons
             document.querySelectorAll('.tab-button').forEach(btn => {
                 btn.classList.remove('active', 'border-blue-400', 'text-blue-400');
@@ -674,6 +693,7 @@
                 loadSettings();
             } else if (tabName === 'rag') {
                 loadRagCollections();
+                startRagAutoRefresh();
             } else if (tabName === 'chat') {
                 loadChatModels();
                 loadChatRagCollections();
@@ -763,6 +783,24 @@
                 case 'downloading': return 'status-downloading';
                 case 'failed': return 'status-failed';
                 default: return 'status-unloaded';
+            }
+        }
+        
+        function getRagStatusClass(status) {
+            switch (status) {
+                case 'READY': return 'status-ready';
+                case 'PROCESSING': return 'status-processing';
+                case 'ERROR': return 'status-error';
+                default: return 'status-unloaded';
+            }
+        }
+        
+        function getRagStatusText(status) {
+            switch (status) {
+                case 'READY': return 'Ready';
+                case 'PROCESSING': return 'Processing...';
+                case 'ERROR': return 'Error';
+                default: return status || 'Unknown';
             }
         }
 
@@ -1986,13 +2024,45 @@
         }
 
         // RAG functions
-        async function loadRagCollections() {
+        async function loadRagCollections(silent = false) {
             try {
                 const response = await apiCall('/v1/rag/collections');
                 const collections = response.collections || [];
+                currentRagCollections = collections;
                 renderRagCollections(collections);
+                
+                if (!silent) {
+                    console.log('RAG collections refreshed:', collections.length);
+                }
             } catch (error) {
-                showToast('Failed to load RAG collections', 'error');
+                if (!silent) {
+                    showToast('Failed to load RAG collections', 'error');
+                }
+                console.error('Failed to load RAG collections:', error);
+            }
+        }
+        
+        function startRagAutoRefresh() {
+            // Stop any existing interval
+            stopRagAutoRefresh();
+            
+            // Start new auto-refresh every 5 seconds when on RAG tab
+            ragRefreshInterval = setInterval(() => {
+                // Only refresh if we're still on the RAG tab
+                const ragTab = document.getElementById('rag-tab');
+                if (!ragTab.classList.contains('hidden')) {
+                    loadRagCollections(true); // Silent refresh
+                }
+            }, 5000);
+            
+            console.log('Started RAG auto-refresh');
+        }
+        
+        function stopRagAutoRefresh() {
+            if (ragRefreshInterval) {
+                clearInterval(ragRefreshInterval);
+                ragRefreshInterval = null;
+                console.log('Stopped RAG auto-refresh');
             }
         }
 
@@ -2004,22 +2074,53 @@
             }
 
             container.innerHTML = collections.map(col => `
-                <div class="bg-gray-700 rounded-lg p-4">
+                <div class="bg-gray-700 rounded-lg p-4 card-hover">
                     <div class="flex items-center justify-between">
-                        <div>
-                            <h4 class="text-lg font-medium text-white">${col.name}</h4>
-                            <p class="text-sm text-gray-400">${col.path}</p>
-                            <p class="text-xs text-gray-500">Status: ${col.status}</p>
+                        <div class="flex-1">
+                            <div class="flex items-center mb-2">
+                                <span class="status-indicator ${getRagStatusClass(col.status)}" title="Status: ${getRagStatusText(col.status)}"></span>
+                                <h4 class="text-lg font-medium text-white">${col.name}</h4>
+                                ${col.is_active ? '<span class="ml-2 px-2 py-1 text-xs bg-green-700 text-green-300 rounded">Active</span>' : ''}
+                            </div>
+                            <p class="text-sm text-gray-400 mb-1">
+                                <i class="fas fa-folder mr-1"></i>${col.path}
+                            </p>
+                            <div class="flex items-center space-x-4 text-xs text-gray-500">
+                                <span class="flex items-center">
+                                    <span class="status-indicator ${getRagStatusClass(col.status)} mr-1" style="width: 6px; height: 6px;"></span>
+                                    ${getRagStatusText(col.status)}
+                                </span>
+                                ${col.document_count ? `<span><i class="fas fa-file mr-1"></i>${col.document_count} docs</span>` : ''}
+                                ${col.created_at ? `<span><i class="fas fa-clock mr-1"></i>Created ${formatLocalTime(col.created_at)}</span>` : ''}
+                                ${col.last_updated ? `<span><i class="fas fa-sync mr-1"></i>Updated ${formatLocalTime(col.last_updated)}</span>` : ''}
+                            </div>
                         </div>
                         <div class="flex space-x-2">
-                            ${col.is_active ?
-                                `<span class="bg-green-600 text-white px-3 py-1 rounded text-sm">Active</span>` :
-                                `<button onclick="activateRagCollection('${col.name}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">Activate</button>`
+                            ${!col.is_active ?
+                                `<button onclick="activateRagCollection('${col.name}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm" ${col.status === 'PROCESSING' ? 'disabled title="Cannot activate while processing"' : ''}>
+                                    <i class="fas fa-play mr-1"></i>Activate
+                                </button>` : ''
                             }
-                            <button onclick="reprocessRagCollection('${col.name}')" class="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-sm">Reprocess</button>
-                            <button onclick="deleteRagCollection('${col.name}')" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm">Delete</button>
+                            <button onclick="reprocessRagCollection('${col.name}')" class="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-sm" ${col.status === 'PROCESSING' ? 'disabled title="Already processing"' : ''}>
+                                <i class="fas fa-sync mr-1"></i>Reprocess
+                            </button>
+                            <button onclick="deleteRagCollection('${col.name}')" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm" ${col.status === 'PROCESSING' ? 'disabled title="Cannot delete while processing"' : ''}>
+                                <i class="fas fa-trash mr-1"></i>Delete
+                            </button>
                         </div>
                     </div>
+                    ${col.status === 'PROCESSING' && col.progress_info ? `
+                        <div class="mt-3 pt-3 border-t border-gray-600">
+                            <div class="flex justify-between text-xs text-gray-400 mb-1">
+                                <span>Processing: ${col.progress_info.current_file || 'Processing files...'}</span>
+                                <span>${col.progress_info.processed || 0}/${col.progress_info.total || '?'} files</span>
+                            </div>
+                            <div class="w-full bg-gray-600 rounded-full h-1.5">
+                                <div class="bg-yellow-500 h-1.5 rounded-full transition-all duration-300" 
+                                     style="width: ${col.progress_info.percent || 0}%"></div>
+                            </div>
+                        </div>
+                    ` : ''}
                 </div>
             `).join('');
         }
@@ -2036,8 +2137,19 @@
             try {
                 showLoading('Creating RAG collection...');
                 await apiCall(`/v1/rag/collections?name=${encodeURIComponent(name)}&path=${encodeURIComponent(path)}`, { method: 'POST' });
-                showToast('RAG collection creation started.');
+                showToast('RAG collection creation started. Processing will begin shortly.');
+                
+                // Clear the input fields
+                document.getElementById('rag-collection-name').value = '';
+                document.getElementById('rag-folder-path').value = '';
+                
+                // Refresh immediately to show the new collection
                 loadRagCollections();
+                
+                // Make sure auto-refresh is running to show progress
+                if (!ragRefreshInterval) {
+                    startRagAutoRefresh();
+                }
             } catch (error) {
                 showToast('Failed to create RAG collection.', 'error');
             } finally {
@@ -2059,13 +2171,22 @@
         }
 
         async function reprocessRagCollection(name) {
+            if (!confirm(`Are you sure you want to reprocess the RAG collection "${name}"?\n\nThis will re-index all documents in the collection.`)) {
+                return;
+            }
+            
             try {
-                showLoading('Reprocessing RAG collection...');
+                showLoading('Starting reprocessing...');
                 await apiCall(`/v1/rag/collections/${name}/reprocess`, { method: 'POST' });
-                showToast(`Reprocessing of RAG collection ${name} started.`);
+                showToast(`Reprocessing of RAG collection "${name}" started. Check status for progress.`);
+                
+                // Refresh immediately and ensure auto-refresh is running
                 loadRagCollections();
+                if (!ragRefreshInterval) {
+                    startRagAutoRefresh();
+                }
             } catch (error) {
-                showToast('Failed to reprocess RAG collection.', 'error');
+                showToast('Failed to start reprocessing.', 'error');
             } finally {
                 hideLoading();
             }
@@ -2081,6 +2202,18 @@
                 loadRagCollections();
             } catch (error) {
                 showToast('Failed to delete RAG collection.', 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        async function refreshRagCollections() {
+            try {
+                showLoading('Refreshing RAG collections...');
+                await loadRagCollections();
+                showToast('RAG collections refreshed successfully.');
+            } catch (error) {
+                showToast('Failed to refresh RAG collections.', 'error');
             } finally {
                 hideLoading();
             }

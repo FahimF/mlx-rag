@@ -30,6 +30,7 @@ class DatabaseManager:
             database_path = os.path.join(app_dir, "mlx-gui.db")
         
         self.database_path = database_path
+        self.db_dir = os.path.dirname(database_path)
         self.database_url = f"sqlite:///{database_path}"
         
         # Create engine with SQLite optimizations
