@@ -168,14 +168,14 @@
                     <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="transcribe">
                         <i class="fas fa-microphone mr-2"></i>Transcribe
                     </button>
-                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="settings">
-                        <i class="fas fa-cog mr-2"></i>Settings
-                    </button>
                     <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="rag">
                         <i class="fas fa-robot mr-2"></i>RAG
                     </button>
                     <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="chat">
                         <i class="fas fa-comments mr-2"></i>Chat
+                    </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="settings">
+                        <i class="fas fa-cog mr-2"></i>Settings
                     </button>
                 </nav>
             </div>
@@ -431,73 +431,6 @@
                     </div>
                 </div>
 
-                <!-- Settings Tab -->
-                <!-- Settings Tab -->
-                <div id="settings-tab" class="tab-content hidden">
-                    <h2 class="text-xl font-bold text-white mb-6">Settings</h2>
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <div class="bg-gray-800 rounded-lg p-6">
-                            <h3 class="text-lg font-bold text-white mb-4">Model Management</h3>
-                            <div class="space-y-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-300 mb-2">Auto-unload Inactive Models</label>
-                                    <input type="checkbox" id="auto-unload" class="rounded">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-300 mb-2">Inactivity Timeout (minutes)</label>
-                                    <input type="number" id="timeout-minutes" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="bg-gray-800 rounded-lg p-6">
-                            <h3 class="text-lg font-bold text-white mb-4">System Settings</h3>
-                            <div class="space-y-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-300 mb-2">Max Concurrent Models</label>
-                                    <input type="number" id="max-models" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-300 mb-2">Log Level</label>
-                                    <select id="log-level" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
-                                        <option value="DEBUG">Debug</option>
-                                        <option value="INFO">Info</option>
-                                        <option value="WARNING">Warning</option>
-                                        <option value="ERROR">Error</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="bg-gray-800 rounded-lg p-6">
-                            <h3 class="text-lg font-bold text-white mb-4">Network Settings</h3>
-                            <div class="space-y-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-300 mb-2">Server Port</label>
-                                    <input type="number" id="server-port" min="1" max="65535" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
-                                    <p class="text-xs text-gray-500 mt-1">
-                                        Port number for the server (1-65535). Default is 8000.
-                                    </p>
-                                </div>
-                                <div>
-                                    <label class="flex items-center text-sm font-medium text-gray-300">
-                                        <input type="checkbox" id="bind-all-interfaces" class="rounded mr-2">
-                                        Bind to All Interfaces
-                                    </label>
-                                    <p class="text-xs text-gray-500 mt-1">
-                                        <span class="text-yellow-400">⚠️ Security Risk:</span> Only enable on trusted networks.
-                                    </p>
-                                </div>
-                                <div>
-                                    <button onclick="saveSettings()" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
-                                        <i class="fas fa-save mr-2"></i>Save Settings
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- RAG Tab -->
                 <div id="rag-tab" class="tab-content hidden">
                     <div class="flex justify-between items-center mb-6">
@@ -567,6 +500,72 @@
                             <button onclick="sendMessage()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-r-lg">
                                 <i class="fas fa-paper-plane"></i>
                             </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Tab -->
+                <div id="settings-tab" class="tab-content hidden">
+                    <h2 class="text-xl font-bold text-white mb-6">Settings</h2>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">Model Management</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Auto-unload Inactive Models</label>
+                                    <input type="checkbox" id="auto-unload" class="rounded">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Inactivity Timeout (minutes)</label>
+                                    <input type="number" id="timeout-minutes" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">System Settings</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Max Concurrent Models</label>
+                                    <input type="number" id="max-models" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Log Level</label>
+                                    <select id="log-level" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
+                                        <option value="DEBUG">Debug</option>
+                                        <option value="INFO">Info</option>
+                                        <option value="WARNING">Warning</option>
+                                        <option value="ERROR">Error</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">Network Settings</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Server Port</label>
+                                    <input type="number" id="server-port" min="1" max="65535" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        Port number for the server (1-65535). Default is 8000.
+                                    </p>
+                                </div>
+                                <div>
+                                    <label class="flex items-center text-sm font-medium text-gray-300">
+                                        <input type="checkbox" id="bind-all-interfaces" class="rounded mr-2">
+                                        Bind to All Interfaces
+                                    </label>
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        <span class="text-yellow-400">⚠️ Security Risk:</span> Only enable on trusted networks.
+                                    </p>
+                                </div>
+                                <div>
+                                    <button onclick="saveSettings()" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+                                        <i class="fas fa-save mr-2"></i>Save Settings
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
