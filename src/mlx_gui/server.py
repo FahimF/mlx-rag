@@ -675,7 +675,7 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/chat")
     async def chat(request: dict, db: Session = Depends(get_db_session)):
-        """Handle a chat request."""
+        """Handle a chat request with RAG support and auto-loading."""
         message = request.get("message")
         model_name = request.get("model")
         rag_collection_name = request.get("rag_collection")
@@ -685,36 +685,77 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Message and model are required.")
 
         async def stream_response():
-            # Get the model
-            model_manager = get_model_manager()
-            language_model = model_manager.get_model_for_inference(model_name)
-            if not language_model:
-                yield f"Error: Model '{model_name}' not loaded."
-                return
+            try:
+                # Check if model exists in database
+                model_record = db.query(Model).filter(Model.name == model_name).first()
+                if not model_record:
+                    yield f"Error: Model '{model_name}' not found. Please install it first."
+                    return
 
-            # Get RAG context if a collection is selected
-            rag_context = ""
-            if rag_collection_name:
-                rag_manager = get_rag_manager()
-                rag_context = rag_manager.query(message, rag_collection_name)
+                model_manager = get_model_manager()
+                
+                # Check if model is loaded, auto-load if not (like chat/completions endpoint)
+                language_model = model_manager.get_model_for_inference(model_name)
+                if not language_model:
+                    logger.info(f"Model {model_name} not loaded, attempting to load...")
+                    yield f"Loading model {model_name}..."
+                    success = await model_manager.load_model_async(
+                        model_name=model_name,
+                        model_path=model_record.path,
+                        priority=10  # High priority for chat requests
+                    )
+                    if not success:
+                        yield f"Error: Failed to load model '{model_name}'"
+                        return
 
-            # Construct the prompt
-            prompt = ""
-            if rag_context:
-                prompt += f"Context:\n{rag_context}\n\n"
-            
-            # Add history to prompt
-            for msg in history:
-                prompt += f"{msg['role']}: {msg['content']}\n"
-            
-            prompt += f"user: {message}\nassistant:"
+                    # Re-fetch the loaded model after loading
+                    language_model = model_manager.get_model_for_inference(model_name)
+                    if not language_model:
+                        yield f"Error: Model '{model_name}' failed to load properly"
+                        return
+                    
+                    yield f"Model {model_name} loaded successfully.\n\n"
 
-            # Generate the response
-            from mlx_gui.mlx_integration import GenerationConfig
-            config = GenerationConfig()
-            
-            async for chunk in language_model.mlx_wrapper.generate_stream(prompt, config):
-                yield chunk
+                # Get RAG context if a collection is selected
+                rag_context = ""
+                if rag_collection_name:
+                    try:
+                        rag_manager = get_rag_manager()
+                        # Get the ChromaDB collection and query it directly
+                        chroma_collection = rag_manager.chroma_client.get_collection(name=rag_collection_name)
+                        results = chroma_collection.query(
+                            query_texts=[message],
+                            n_results=5
+                        )
+                        # Join the retrieved documents as context
+                        if results["documents"][0]:
+                            rag_context = "\n".join(results["documents"][0])
+                            logger.info(f"RAG context retrieved: {len(rag_context)} characters from {len(results['documents'][0])} documents")
+                    except Exception as e:
+                        logger.error(f"Error retrieving RAG context: {e}")
+                        yield f"Warning: Could not retrieve RAG context from '{rag_collection_name}': {e}\n\n"
+
+                # Construct the prompt
+                prompt = ""
+                if rag_context:
+                    prompt += f"Context (relevant code and documentation):\n{rag_context}\n\nPlease use the above context to answer the following question.\n\n"
+                
+                # Add history to prompt
+                for msg in history:
+                    prompt += f"{msg['role']}: {msg['content']}\n"
+                
+                prompt += f"user: {message}\nassistant:"
+
+                # Generate the response
+                from mlx_gui.mlx_integration import GenerationConfig
+                config = GenerationConfig()
+                
+                async for chunk in language_model.mlx_wrapper.generate_stream(prompt, config):
+                    yield chunk
+                    
+            except Exception as e:
+                logger.error(f"Error in chat endpoint: {e}", exc_info=True)
+                yield f"Error: {str(e)}"
 
         return StreamingResponse(stream_response(), media_type="text/event-stream")
 
