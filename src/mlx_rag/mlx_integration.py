@@ -1070,6 +1070,8 @@ class MLXLoader:
         """Download model from HuggingFace Hub with progress tracking."""
         try:
             logger.info(f"Downloading model {model_id}")
+            logger.info(f"Downloading model to cache: {self.cache_dir}")
+
 
             # Initialize progress tracking
             if hasattr(self, '_download_progress'):
@@ -1109,6 +1111,7 @@ class MLXLoader:
                 'progress': 5
             })
 
+            
             local_path = snapshot_download(
                 repo_id=model_id,
                 cache_dir=self.cache_dir,
@@ -1116,6 +1119,9 @@ class MLXLoader:
                 local_files_only=False,
                 max_workers=4  # Limit concurrent downloads
             )
+            logger.info(f"Model cached at: {local_path}")
+
+            logger.info(f"Model {model_id} downloaded to: {local_path}")
 
             # Update progress to show download complete
             if model_id in self._download_progress:
@@ -1525,10 +1531,23 @@ class MLXLoader:
 
 
 class MLXInferenceEngine:
-    """High-level inference engine for MLX models."""
-
+    """High-level inference engine for MLX models."""        
     def __init__(self):
-        self.loader = MLXLoader()
+        
+        # Use HF_HOME environment variable for cache if set, otherwise use default
+        import os
+        hf_cache_dir = os.getenv('HF_HOME')
+        if hf_cache_dir:
+            # HuggingFace Hub cache is typically in HF_HOME/hub
+            cache_dir = os.path.join(hf_cache_dir, 'hub')
+            print(f"[DEBUG] Using custom HuggingFace cache directory from HF_HOME: {cache_dir}")
+            logger.error(f"[DEBUG] Using custom HuggingFace cache directory from HF_HOME: {cache_dir}")
+        else:
+            cache_dir = None
+            print("[DEBUG] Using default HuggingFace cache directory")
+            logger.error("[DEBUG] Using default HuggingFace cache directory")
+        
+        self.loader = MLXLoader(cache_dir=cache_dir)
         self._loaded_models: Dict[str, MLXModelWrapper] = {}
 
     def load_model(self, model_name: str, model_path: str, token: Optional[str] = None) -> MLXModelWrapper:
