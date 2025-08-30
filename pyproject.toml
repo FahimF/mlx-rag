@@ -96,6 +96,18 @@ vision = [
     "sentencepiece>=0.2.0",
 ]
 
+rag-full = [
+    # Multi-language tree-sitter parsers for comprehensive RAG support
+    "tree-sitter-javascript>=0.21.0",
+    "tree-sitter-typescript>=0.21.0",
+    "tree-sitter-java>=0.21.0",
+    "tree-sitter-cpp>=0.21.0",
+    "tree-sitter-c>=0.21.0",
+    "tree-sitter-go>=0.21.0",
+    "tree-sitter-rust>=0.21.0",
+    "tree-sitter-bash>=0.21.0",
+]
+
 [project.scripts]
 mlx-gui = "mlx_gui.cli:main"
 

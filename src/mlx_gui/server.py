@@ -650,6 +650,36 @@ def create_app() -> FastAPI:
         db.commit()
         return {"message": f"RAG collection '{collection_name}' deleted."}
 
+    @app.get("/v1/rag/languages")
+    async def get_supported_languages():
+        """Get supported programming languages for RAG processing."""
+        rag_manager = get_rag_manager()
+        languages = []
+        
+        for ext, config in rag_manager.language_config.items():
+            languages.append({
+                "extension": ext,
+                "language": config['name'],
+                "available": config['parser'] is not None and config['language'] is not None,
+                "node_types": config['node_types'],
+                "package_name": f"tree-sitter-{config['name'].lower().replace(' ', '-').replace('+', 'p')}"
+            })
+        
+        # Sort by language name
+        languages.sort(key=lambda x: x['language'])
+        
+        available_count = sum(1 for lang in languages if lang['available'])
+        total_count = len(languages)
+        
+        return {
+            "languages": languages,
+            "summary": {
+                "total_languages": total_count,
+                "available_languages": available_count,
+                "missing_languages": total_count - available_count
+            }
+        }
+
     @app.post("/v1/rag/collections/{collection_name}/reprocess")
     async def reprocess_rag_collection(collection_name: str, db: Session = Depends(get_db_session)):
         """Reprocess a RAG collection."""

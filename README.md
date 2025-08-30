@@ -162,6 +162,294 @@
 - **🍎 macOS System Tray** - Native menu bar integration
 - **📱 Standalone App** - Packaged macOS app bundle (no Python required)
 
+## 🔍 Multi-Language RAG System
+
+### 🌟 **Language Support Overview**
+
+MLX-GUI features a comprehensive **Retrieval-Augmented Generation (RAG)** system that understands code across **17 programming languages**. From Python to Dart/Flutter, your AI can now provide contextual answers about any codebase.
+
+#### **✅ Supported Languages**
+
+| Language | Extension(s) | Parser Type | Status |
+|----------|--------------|-------------|--------|
+| **Python** | `.py` | Tree-sitter | ✅ Built-in |
+| **JavaScript** | `.js`, `.jsx` | Tree-sitter | 🔧 Optional |
+| **TypeScript** | `.ts`, `.tsx` | Tree-sitter | 🔧 Optional |
+| **Java** | `.java` | Tree-sitter | 🔧 Optional |
+| **C++** | `.cpp`, `.cc`, `.cxx`, `.hpp` | Tree-sitter | 🔧 Optional |
+| **C** | `.c`, `.h` | Tree-sitter | 🔧 Optional |
+| **Go** | `.go` | Tree-sitter | 🔧 Optional |
+| **Rust** | `.rs` | Tree-sitter | 🔧 Optional |
+| **Bash/Shell** | `.sh`, `.bash` | Tree-sitter | 🔧 Optional |
+| **🎯 Dart/Flutter** | `.dart` | Pattern-based | ✅ **Built-in** |
+
+> **🎯 Special Focus: Dart/Flutter** - Full built-in support with Flutter-aware parsing for widgets, async functions, streams, and state management patterns.
+
+### 🚀 **Quick RAG Setup**
+
+#### **1. Create a RAG Collection**
+```bash
+# Via API
+curl -X POST "http://localhost:8000/v1/rag/collections" \
+  -d "name=MyProject&path=/path/to/your/codebase"
+
+# Via Web UI
+# Navigate to localhost:8000/admin → RAG tab → Create Collection
+```
+
+#### **2. Check Language Support Status**
+```bash
+# Check which parsers are available
+uv run python install_language_parsers.py
+
+# Or via API
+curl -s "http://localhost:8000/v1/rag/languages" | jq
+```
+
+#### **3. Query Your Codebase**
+```bash
+# Ask questions about your code
+curl -X POST "http://localhost:8000/v1/rag/query" \
+  -d "query=How does the authentication system work?"
+
+# Or use chat with RAG context
+curl -X POST "http://localhost:8000/v1/chat" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Explain the main Flutter widgets in this app",
+    "model": "qwen2.5-coder-7b-instruct",
+    "rag_collection": "MyFlutterApp"
+  }'
+```
+
+### 🔧 **Installing Language Parsers**
+
+#### **Option 1: Install All Language Support**
+```bash
+# Using uv (recommended)
+uv sync --extra rag-full
+
+# Or via pip
+pip install mlx-gui[rag-full]
+```
+
+#### **Option 2: Install Specific Languages**
+```bash
+# Interactive installer
+uv run python install_language_parsers.py --install javascript typescript java
+
+# Manual installation
+pip install tree-sitter-javascript tree-sitter-typescript tree-sitter-java
+```
+
+#### **Option 3: Check Installation Status**
+```bash
+# See what's installed and what's missing
+uv run python install_language_parsers.py
+
+# Install all missing parsers
+uv run python install_language_parsers.py --install-missing
+```
+
+### 🎯 **Dart/Flutter RAG Features**
+
+Dart/Flutter support is **built-in** and requires no additional setup! The system automatically recognizes:
+
+#### **Flutter Widget Detection**
+```dart
+// ✅ Detected as 'flutter_widget'
+class MyHomePage extends StatefulWidget {
+  @override
+  _MyHomePageState createState() => _MyHomePageState();
+}
+
+class LoginScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(...);
+  }
+}
+```
+
+#### **Async Function Recognition**
+```dart
+// ✅ Detected as 'async_function'
+Future<UserData> fetchUserProfile(String userId) async {
+  final response = await http.get(Uri.parse('/api/users/$userId'));
+  return UserData.fromJson(response.body);
+}
+
+// ✅ Detected as 'stream_function'
+Stream<List<Message>> watchMessages() async* {
+  await for (final snapshot in FirebaseFirestore.instance
+      .collection('messages').snapshots()) {
+    yield snapshot.docs.map((doc) => Message.fromDoc(doc)).toList();
+  }
+}
+```
+
+#### **Standard Dart Patterns**
+```dart
+// ✅ Detected as 'void_function'
+void main() {
+  runApp(MyApp());
+}
+
+// ✅ Detected as 'class'
+class DatabaseHelper {
+  static final DatabaseHelper _instance = DatabaseHelper._internal();
+  factory DatabaseHelper() => _instance;
+}
+```
+
+### 📊 **RAG API Endpoints**
+
+#### **🔧 Collection Management**
+```bash
+# Create a new RAG collection
+POST /v1/rag/collections
+{
+  "name": "MyProject",
+  "path": "/path/to/codebase"
+}
+
+# List all collections
+GET /v1/rag/collections
+
+# Activate a collection
+POST /v1/rag/collections/{name}/activate
+
+# Reprocess a collection (after code changes)
+POST /v1/rag/collections/{name}/reprocess
+
+# Delete a collection
+DELETE /v1/rag/collections/{name}
+```
+
+#### **🔍 Language Support**
+```bash
+# Get supported languages and their status
+GET /v1/rag/languages
+
+# Example response:
+{
+  "languages": [
+    {
+      "extension": ".dart",
+      "language": "Dart/Flutter", 
+      "available": true,
+      "node_types": ["class", "function", "method"],
+      "package_name": "built-in"
+    }
+  ],
+  "summary": {
+    "total_languages": 17,
+    "available_languages": 10,
+    "missing_languages": 7
+  }
+}
+```
+
+#### **🎯 RAG Queries**
+```bash
+# Query the active RAG collection
+POST /v1/rag/query
+{
+  "query": "How do I implement user authentication?"
+}
+
+# Chat with RAG context (recommended)
+POST /v1/chat
+{
+  "message": "Explain the Flutter navigation system",
+  "model": "qwen2.5-coder-7b-instruct", 
+  "rag_collection": "MyFlutterApp",
+  "history": []
+}
+```
+
+### 🔍 **Adding New Languages**
+
+Want to add support for a new programming language? Here's how:
+
+#### **1. Tree-sitter Based (Recommended)**
+```python
+# Add to rag_manager.py language_config
+'.your_ext': {
+    'language': YOUR_LANGUAGE_PARSER,
+    'parser': Parser() if YOUR_LANGUAGE_PARSER else None,
+    'name': 'Your Language',
+    'node_types': ['function_definition', 'class_definition'],
+    'name_field': 'name'
+}
+```
+
+#### **2. Pattern-based (Like Dart)**
+```python
+# Add to rag_manager.py language_config
+'.your_ext': {
+    'language': None,  # No tree-sitter parser
+    'parser': None,
+    'name': 'Your Language',
+    'node_types': ['function', 'class'],
+    'name_field': 'name',
+    'text_patterns': [  # Regex patterns for detection
+        r'function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(',
+        r'class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{'
+    ]
+}
+```
+
+#### **3. Add to pyproject.toml (Optional)**
+```toml
+[project.optional-dependencies]
+rag-full = [
+    # ... existing parsers ...
+    "tree-sitter-yourlanguage>=0.21.0",
+]
+```
+
+### 💡 **RAG Best Practices**
+
+#### **🎯 Collection Organization**
+- **One collection per project** - Keep related code together
+- **Exclude build directories** - The system automatically skips common build dirs
+- **Include documentation** - README files and comments are indexed too
+- **Reprocess after major changes** - Keep your RAG knowledge up-to-date
+
+#### **📝 Query Optimization**
+- **Be specific** - "How does user authentication work?" vs "What is this?"
+- **Use technical terms** - "JWT token validation" vs "login stuff"
+- **Reference file names** - "How does utils.dart handle network requests?"
+- **Ask about patterns** - "Show me all StatefulWidgets" or "Find async functions"
+
+#### **🔧 Performance Tips**
+- **Load your language model first** - RAG requires a loaded model to generate responses
+- **Use appropriate chunk sizes** - The system optimizes automatically
+- **Monitor collection status** - Check `/v1/rag/collections` for processing status
+
+### 🧪 **Testing Your RAG Setup**
+
+```bash
+# 1. Check language support status
+uv run python install_language_parsers.py
+
+# 2. Test the RAG manager directly
+uv run python -c "
+from mlx_gui.rag_manager import get_rag_manager
+rag = get_rag_manager()
+print(f'Supported extensions: {list(rag.language_config.keys())}')
+"
+
+# 3. Create a test collection
+curl -X POST 'http://localhost:8000/v1/rag/collections' \
+  -d 'name=TestProject&path=/Users/you/Code/your-project'
+
+# 4. Query your codebase
+curl -X POST 'http://localhost:8000/v1/rag/query' \
+  -d 'query=What functions are defined in this codebase?'
+```
+
 ## 🤖 Tested Models
 
 **Text Generation**
