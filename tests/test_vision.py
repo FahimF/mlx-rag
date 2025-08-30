@@ -16,7 +16,7 @@ BASE_URL = "http://127.0.0.1:8000"
 TIMEOUT = 120.0
 
 async def test_vision_with_icon():
-    """Test vision model with the MLX-GUI icon."""
+    """Test vision model with the MLX-RAG icon."""
     print("🖼️ Testing Vision Model with icon.png")
     print("=" * 50)
     
@@ -151,7 +151,7 @@ async def test_vision_with_icon():
 
 async def main():
     """Main test function."""
-    print("🚀 MLX-GUI Vision Test")
+    print("🚀 MLX-RAG Vision Test")
     print("📋 Testing vision model with icon.png")
     print()
     

@@ -1,5 +1,5 @@
 """
-Real download progress tracking for MLX-GUI.
+Real download progress tracking for MLX-RAG.
 This module provides actual progress tracking for HuggingFace downloads.
 """
 

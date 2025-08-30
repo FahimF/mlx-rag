@@ -77,8 +77,8 @@ except ImportError:
     BASH = None
     logging.debug("tree-sitter-bash not available")
 
-from mlx_gui.database import get_database_manager
-from mlx_gui.models import RAGCollection, RAGCollectionStatus
+from mlx_rag.database import get_database_manager
+from mlx_rag.models import RAGCollection, RAGCollectionStatus
 
 logger = logging.getLogger(__name__)
 
@@ -635,7 +635,7 @@ class RAGManager:
 
     def query(self, query: str, collection_name: str) -> str:
         """Query a RAG collection."""
-        from mlx_gui.model_manager import get_model_manager
+        from mlx_rag.model_manager import get_model_manager
         model_manager = get_model_manager()
 
         # 1. Get the ChromaDB collection
@@ -665,7 +665,7 @@ class RAGManager:
         context = "\n".join(results["documents"][0])
         prompt = f"Context:\n{context}\n\nQuestion: {query}\n\nAnswer:"
         
-        from mlx_gui.mlx_integration import GenerationConfig
+        from mlx_rag.mlx_integration import GenerationConfig
         config = GenerationConfig()
         response = language_model.mlx_wrapper.generate(prompt, config)
 

@@ -1,5 +1,5 @@
 """
-macOS system tray integration for MLX-GUI.
+macOS system tray integration for MLX-RAG.
 """
 
 import logging
@@ -16,7 +16,7 @@ import requests
 import rumps
 import uvicorn
 
-from mlx_gui.database import get_database_manager
+from mlx_rag.database import get_database_manager
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def _acquire_tray_lock():
     
     # Create lock file in user's temp directory
     import tempfile
-    lock_path = os.path.join(tempfile.gettempdir(), "mlx-gui-tray.lock")
+    lock_path = os.path.join(tempfile.gettempdir(), "mlx-rag-tray.lock")
     
     try:
         # Try to create lock file exclusively
@@ -79,7 +79,7 @@ def _release_tray_lock():
 
 
 class MLXTrayApp(rumps.App):
-    """MLX-GUI system tray application for macOS."""
+    """MLX-RAG system tray application for macOS."""
     
     def __init__(self, port: int = 8000, host: str = "127.0.0.1"):
         # Use simple text instead of icon - much cleaner!
@@ -118,7 +118,7 @@ class MLXTrayApp(rumps.App):
         self.separator2 = rumps.MenuItem("---", callback=None)
         
         # Version info
-        from mlx_gui import __version__
+        from mlx_rag import __version__
         self.version_item = rumps.MenuItem(f"ℹ️ Version {__version__}", callback=None)
         
         # GitHub link
@@ -164,13 +164,13 @@ class MLXTrayApp(rumps.App):
         self.quit_button = None
         
     def start_server_background(self):
-        """Start the MLX-GUI server in a background thread."""
+        """Start the MLX-RAG server in a background thread."""
         try:
-            logger.info(f"Starting MLX-GUI server on {self.host}:{self.port}")
+            logger.info(f"Starting MLX-RAG server on {self.host}:{self.port}")
             self.server_running = True
             
             # Import server module here to avoid circular imports
-            from mlx_gui.server import create_app
+            from mlx_rag.server import create_app
             fastapi_app = create_app()
             
             # Configure uvicorn directly (no CLI involvement)
@@ -335,7 +335,7 @@ class MLXTrayApp(rumps.App):
                     # Show result
                     if failed_count == 0:
                         rumps.notification(
-                            title="MLX-GUI",
+                            title="MLX-RAG",
                             subtitle="Models Unloaded", 
                             message=f"Successfully unloaded {unloaded_count} models",
                             sound=False
@@ -362,8 +362,8 @@ class MLXTrayApp(rumps.App):
                 )
     
     def open_github(self, sender):
-        """Open the MLX-GUI GitHub repository."""
-        github_url = "https://github.com/RamboRogers/mlx-gui"
+        """Open the MLX-RAG GitHub repository."""
+        github_url = "https://github.com/FahimF/mlx-rag"
         logger.info(f"Opening GitHub repository: {github_url}")
         
         try:
@@ -463,7 +463,7 @@ class MLXTrayApp(rumps.App):
         
         # Show notification
         rumps.notification(
-            title="MLX-GUI",
+            title="MLX-RAG",
             subtitle="Server Restarted",
             message=f"Server now binding to: {self.host}:{self.port}",
             sound=False
@@ -472,14 +472,14 @@ class MLXTrayApp(rumps.App):
     def quit_app(self, sender):
         """Quit the application and stop the server."""
         response = rumps.alert(
-            title="Quit MLX-GUI",
-            message="Are you sure you want to quit MLX-GUI?\nThis will stop the server and unload all models.",
+            title="Quit MLX-RAG",
+            message="Are you sure you want to quit MLX-RAG?\nThis will stop the server and unload all models.",
             ok="Quit",
             cancel="Cancel"
         )
         
         if response == 1:  # OK clicked
-            logger.info("Shutting down MLX-GUI...")
+            logger.info("Shutting down MLX-RAG...")
             
             # Stop status timer
             if hasattr(self, 'status_timer'):
@@ -527,10 +527,10 @@ class MLXTrayApp(rumps.App):
 
 
 def run_tray_app(port: int = 8000, host: str = "127.0.0.1"):
-    """Run the MLX-GUI tray application."""
+    """Run the MLX-RAG tray application."""
     # Check for existing tray instance
     if not _acquire_tray_lock():
-        print("Another MLX-GUI tray instance is already running.")
+        print("Another MLX-RAG tray instance is already running.")
         logger.warning("Another tray instance is already running, exiting.")
         return False
     

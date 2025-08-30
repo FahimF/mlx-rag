@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# MLX-GUI App Signing and Notarization Script
+# MLX-RAG App Signing and Notarization Script
 # This script will zip the app, submit for notarization, and staple the result
 
 set -e  # Exit on any error
 
-echo "🍎 MLX-GUI App Signing and Notarization"
+echo "🍎 MLX-RAG App Signing and Notarization"
 echo "======================================="
 
 # Configuration
-APP_PATH="dist/MLX-GUI.app"
-ZIP_PATH="dist/MLX-GUI.zip"
+APP_PATH="dist/MLX-RAG.app"
+ZIP_PATH="dist/MLX-RAG.zip"
 APPLE_ID="matt@rogers.uno"
 
 # Check if app exists
@@ -73,7 +73,7 @@ if echo "$SUBMIT_RESULT" | grep -q "status: Accepted"; then
     echo "✅ App successfully stapled!"
 
     echo ""
-    echo "🎉 MLX-GUI.app is now signed and notarized!"
+    echo "🎉 MLX-RAG.app is now signed and notarized!"
     echo "📁 Location: $APP_PATH"
     echo "📦 Zip archive: $ZIP_PATH"
 

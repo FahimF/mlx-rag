@@ -1,5 +1,5 @@
 """
-Model management and loading system for MLX-GUI.
+Model management and loading system for MLX-RAG.
 Handles model lifecycle, queue management, and MLX-LM integration.
 """
 
@@ -24,11 +24,11 @@ from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 import mlx.core as mx
 from sqlalchemy.orm import Session
 
-from mlx_gui.database import get_database_manager, get_db_session
-from mlx_gui.models import Model, ModelStatus, InferenceRequest, RequestQueue, QueueStatus
-from mlx_gui.system_monitor import get_system_monitor
-from mlx_gui.mlx_integration import get_inference_engine, MLXModelWrapper, GenerationConfig, GenerationResult
-from mlx_gui.huggingface_integration import get_huggingface_client
+from mlx_rag.database import get_database_manager, get_db_session
+from mlx_rag.models import Model, ModelStatus, InferenceRequest, RequestQueue, QueueStatus
+from mlx_rag.system_monitor import get_system_monitor
+from mlx_rag.mlx_integration import get_inference_engine, MLXModelWrapper, GenerationConfig, GenerationResult
+from mlx_rag.huggingface_integration import get_huggingface_client
 
 logger = logging.getLogger(__name__)
 

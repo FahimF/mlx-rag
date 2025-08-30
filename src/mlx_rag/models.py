@@ -1,5 +1,5 @@
 """
-SQLAlchemy models for MLX-GUI database schema.
+SQLAlchemy models for MLX-RAG database schema.
 """
 
 from datetime import datetime

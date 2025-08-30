@@ -1,5 +1,5 @@
 """
-System monitoring utilities for MLX-GUI.
+System monitoring utilities for MLX-RAG.
 Handles memory checking, system resource monitoring, and hardware detection.
 """
 

@@ -1,5 +1,5 @@
 """
-FastAPI server for MLX-GUI REST API.
+FastAPI server for MLX-RAG REST API.
 """
 
 import logging
@@ -18,16 +18,16 @@ import tempfile
 import os
 import uuid
 
-from mlx_gui.database import get_db_session, get_database_manager
-from mlx_gui.models import Model, AppSettings, RAGCollection
-from mlx_gui.system_monitor import get_system_monitor
-from mlx_gui.huggingface_integration import get_huggingface_client
-from mlx_gui.model_manager import get_model_manager
-from mlx_gui.rag_manager import get_rag_manager
-from mlx_gui.mlx_integration import GenerationConfig, get_inference_engine
-from mlx_gui.inference_queue_manager import get_inference_manager, QueuedRequest
-from mlx_gui.queued_inference import queued_generate_text, queued_generate_text_stream, queued_transcribe_audio, queued_generate_speech, queued_generate_embeddings, queued_generate_vision
-from mlx_gui import __version__
+from mlx_rag.database import get_db_session, get_database_manager
+from mlx_rag.models import Model, AppSettings, RAGCollection
+from mlx_rag.system_monitor import get_system_monitor
+from mlx_rag.huggingface_integration import get_huggingface_client
+from mlx_rag.model_manager import get_model_manager
+from mlx_rag.rag_manager import get_rag_manager
+from mlx_rag.mlx_integration import GenerationConfig, get_inference_engine
+from mlx_rag.inference_queue_manager import get_inference_manager, QueuedRequest
+from mlx_rag.queued_inference import queued_generate_text, queued_generate_text_stream, queued_transcribe_audio, queued_generate_speech, queued_generate_embeddings, queued_generate_vision
+from mlx_rag import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -499,7 +499,7 @@ async def _process_image_urls(image_urls: List[str]) -> List[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager."""
-    logger.info("Starting MLX-GUI server...")
+    logger.info("Starting MLX-RAG server...")
 
     # Initialize database
     db_manager = get_database_manager()
@@ -510,8 +510,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Cleanup
     try:
         # Kill everything immediately
-        from mlx_gui.model_manager import shutdown_model_manager
-        from mlx_gui.inference_queue_manager import shutdown_inference_manager
+        from mlx_rag.model_manager import shutdown_model_manager
+        from mlx_rag.inference_queue_manager import shutdown_inference_manager
         shutdown_inference_manager()
         shutdown_model_manager()
         db_manager.close()
@@ -522,7 +522,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
-        title="MLX-GUI API",
+        title="MLX-RAG API",
         description="A lightweight RESTful wrapper around Apple's MLX engine",
         version=__version__,
         lifespan=lifespan,
@@ -551,7 +551,7 @@ def create_app() -> FastAPI:
     async def root():
         """Root endpoint with basic server info."""
         return {
-            "name": "MLX-GUI API",
+            "name": "MLX-RAG API",
             "version": __version__,
             "status": "running"
         }
@@ -777,7 +777,7 @@ def create_app() -> FastAPI:
                 prompt += f"user: {message}\nassistant:"
 
                 # Generate the response
-                from mlx_gui.mlx_integration import GenerationConfig
+                from mlx_rag.mlx_integration import GenerationConfig
                 config = GenerationConfig()
                 
                 async for chunk in language_model.mlx_wrapper.generate_stream(prompt, config):
@@ -1101,12 +1101,12 @@ def create_app() -> FastAPI:
     @app.get("/v1/system/version")
     async def get_version():
         """Get application version information."""
-        from mlx_gui import __version__, __author__, __description__
+        from mlx_rag import __version__, __author__, __description__
         return {
             "version": __version__,
             "author": __author__,
             "description": __description__,
-            "name": "MLX-GUI"
+            "name": "MLX-RAG"
         }
 
     @app.get("/v1/settings")
@@ -2131,7 +2131,7 @@ def create_app() -> FastAPI:
                         "id": model.name,
                         "object": "model",
                         "created": int(model.created_at.timestamp()) if model.created_at else int(time.time()),
-                        "owned_by": "mlx-gui",
+                        "owned_by": "mlx-rag",
                         "permission": [],
                         "root": model.name,
                         "parent": None
@@ -2316,8 +2316,8 @@ def create_app() -> FastAPI:
                 meipass_path = Path(sys._MEIPASS)
                 if meipass_path.exists():
                     logger.info(f"_MEIPASS contents: {list(meipass_path.iterdir())}")
-                    mlx_gui_path = meipass_path / "mlx_gui"
-                    if mlx_gui_path.exists():
+                    mlx_rag_path = meipass_path / "mlx_gui"
+                    if mlx_rag_path.exists():
                         logger.info(f"mlx_gui directory contents: {list(mlx_gui_path.iterdir())}")
             else:
                 # Fallback for frozen apps without _MEIPASS
@@ -2360,7 +2360,7 @@ def create_app() -> FastAPI:
             html_content = f.read()
 
         # Replace version placeholder with actual version
-        from mlx_gui import __version__
+        from mlx_rag import __version__
         html_content = html_content.replace('{{ version }}', __version__)
 
         return HTMLResponse(content=html_content)

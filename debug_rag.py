@@ -10,9 +10,9 @@ import logging
 # Add the src directory to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from mlx_gui.database import get_database_manager
-from mlx_gui.models import RAGCollection
-from mlx_gui.rag_manager import get_rag_manager
+from mlx_rag.database import get_database_manager
+from mlx_rag.models import RAGCollection
+from mlx_rag.rag_manager import get_rag_manager
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)

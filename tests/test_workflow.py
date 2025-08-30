@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for MLX-GUI complete workflow:
+Test script for MLX-RAG complete workflow:
 1. Discover models
 2. Install a model
 3. Load the model  
@@ -16,10 +16,10 @@ from typing import Dict, Any
 BASE_URL = "http://localhost:8000"
 
 async def test_workflow():
-    """Test the complete MLX-GUI workflow."""
+    """Test the complete MLX-RAG workflow."""
     
     async with httpx.AsyncClient(timeout=300.0) as client:
-        print("🧪 Testing MLX-GUI Complete Workflow\n")
+        print("🧪 Testing MLX-RAG Complete Workflow\n")
         
         # Step 1: Check system status
         print("1️⃣ Checking system status...")

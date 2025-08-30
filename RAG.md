@@ -1,6 +1,6 @@
-# Plan for RAG Feature in MLX-GUI
+# Plan for RAG Feature in MLX-RAG
 
-This document outlines the plan for adding a Retrieval-Augmented Generation (RAG) feature to the `mlx-gui` application.
+This document outlines the plan for adding a Retrieval-Augmented Generation (RAG) feature to the `mlx-rag` application.
 
 ### 1. Core Objective
 
@@ -23,9 +23,9 @@ For this functionality, a **vector database** is the ideal backing storage. Here
     This will enable sophisticated queries, like asking a question about a specific file or function.
 *   **Persistence:** The vector database will save the generated embeddings, eliminating the need to re-process all the source code every time the application is launched.
 
-**Recommendation for `mlx-gui`:**
+**Recommendation for `mlx-rag`:**
 
-Given that `mlx-gui` is a local-first desktop application, an **embedded vector database** is the perfect fit. This avoids the complexity of running a separate database server. My top recommendation is:
+Given that `mlx-rag` is a local-first desktop application, an **embedded vector database** is the perfect fit. This avoids the complexity of running a separate database server. My top recommendation is:
 
 *   **ChromaDB:** It's an open-source, embedded vector database that is incredibly easy to integrate with Python. It's perfect for rapid prototyping and is powerful enough for this use case. It can be run in-memory or persisted to disk, which is ideal for managing different RAG collections.
 

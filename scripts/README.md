@@ -1,6 +1,6 @@
-# MLX-GUI Scripts
+# MLX-RAG Scripts
 
-This folder contains build and deployment scripts for the MLX-GUI application.
+This folder contains build and deployment scripts for the MLX-RAG application.
 
 ## 📁 Scripts Overview
 
@@ -9,7 +9,7 @@ This folder contains build and deployment scripts for the MLX-GUI application.
 #### `build_app.sh`
 **Purpose:** Creates a standalone macOS app bundle using PyInstaller  
 **Usage:** `./scripts/build_app.sh`  
-**Output:** `dist/MLX-GUI.app` (1.2GB standalone app)  
+**Output:** `dist/MLX-RAG.app` (1.2GB standalone app)  
 **Features:**
 - ✅ Handles complex MLX ecosystem dependencies
 - ✅ Resolves SSL conflicts with OpenCV

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for the MLX-GUI embeddings endpoint.
+Test script for the MLX-RAG embeddings endpoint.
 
 This script tests the /v1/embeddings endpoint to ensure it works correctly
 with the queuing system and MLX embedding models.
@@ -80,19 +80,19 @@ def test_embeddings_endpoint():
         "encoding_format": "float"
     }
     
-    print("Testing MLX-GUI Embeddings Endpoint")
+    print("Testing MLX-RAG Embeddings Endpoint")
     print("=" * 50)
     
     # Check if server is running
     try:
         response = requests.get(f"{BASE_URL}/health", timeout=5)
         if response.status_code != 200:
-            print("❌ MLX-GUI server is not running or unhealthy")
-            assert False, "MLX-GUI server is not running or unhealthy"
+            print("❌ MLX-RAG server is not running or unhealthy")
+            assert False, "MLX-RAG server is not running or unhealthy"
         print("✅ Server is running and healthy")
     except requests.exceptions.RequestException as e:
         print(f"❌ Cannot connect to server: {e}")
-        print("   Make sure MLX-GUI server is running on http://localhost:8000")
+        print("   Make sure MLX-RAG server is running on http://localhost:8000")
         assert False, f"Cannot connect to server: {e}"
     
     # Test the embeddings endpoint
@@ -250,7 +250,7 @@ def test_embeddings_with_base64():
 
 
 if __name__ == "__main__":
-    print("MLX-GUI Embeddings Endpoint Test")
+    print("MLX-RAG Embeddings Endpoint Test")
     print("This script tests the /v1/embeddings endpoint")
     print()
     

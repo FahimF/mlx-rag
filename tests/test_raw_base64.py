@@ -34,7 +34,7 @@ payload = {
 }
 
 try:
-    print("🔄 Sending request to MLX-GUI server...")
+    print("🔄 Sending request to MLX-RAG server...")
     response = requests.post(
         "http://127.0.0.1:8000/v1/chat/completions",
         headers={"Content-Type": "application/json"},

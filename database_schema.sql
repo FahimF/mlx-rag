@@ -1,4 +1,4 @@
--- MLX-GUI Database Schema
+-- MLX-RAG Database Schema
 -- SQLite database for managing MLX models and application state
 
 -- Models table - stores information about loaded/available models

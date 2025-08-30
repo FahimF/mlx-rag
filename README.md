@@ -1,12 +1,12 @@
 
 
 ```
-███╗   ███╗██╗     ██╗  ██╗      ██████╗ ██╗   ██╗██╗
-████╗ ████║██║     ╚██╗██╔╝     ██╔════╝ ██║   ██║██║
-██╔████╔██║██║      ╚███╔╝█████╗██║  ███╗██║   ██║██║
-██║╚██╔╝██║██║      ██╔██╗╚════╝██║   ██║██║   ██║██║
-██║ ╚═╝ ██║███████╗██╔╝ ██╗     ╚██████╔╝╚██████╔╝██║
-╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝      ╚═════╝  ╚═════╝ ╚═╝
+███╗   ███╗██╗     ██╗  ██╗      ██████╗  █████╗  ██████╗ 
+████╗ ████║██║     ╚██╗██╔╝      ██╔══██╗██╔══██╗██╔════╝ 
+██╔████╔██║██║      ╚███╔╝ █████╗██████╔╝███████║██║  ███╗
+██║╚██╔╝██║██║      ██╔██╗ ╚════╝██╔══██╗██╔══██║██║   ██║
+██║ ╚═╝ ██║███████╗██╔╝ ██╗      ██║  ██║██║  ██║╚██████╔╝
+╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝      ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ 
 ```
 
 
@@ -22,25 +22,6 @@
 **The Swiss Army Knife of Apple Silicon AI - A lightweight Inference Server for Apple's MLX engine with a GUI.**
 
 >*TLDR - OpenRouter-style v1 API interface for MLX with Ollama-like model management, featuring auto-queuing, on-demand model loading, and multi-user serving capabilities via single mac app.*
-
-## 🚀 Apps using MLX-GUI
-
-### 🎤 MLX-Transcribe - Lightning-Fast Voice Transcription
-
-<div align="center">
-<img src="https://github.com/RamboRogers/MLX-Transcribe/blob/master/media/trayapp.png?raw=true" width="400">
-</div>
-
-**[MLX-Transcribe](https://github.com/RamboRogers/MLX-Transcribe)** is a native macOS transcription app that transforms your voice into text instantly at your cursor position. Built with Apple Silicon optimization and seamless MLX-GUI integration, it delivers privacy-first, lightning-fast transcription.
-
-**Key Features:**
-- ⚡ **Instant Transcription** - Press `Control + ~` and speak - text appears instantly at your cursor
-- 🤖 **MLX-GUI Integration** - Seamless local AI processing with automatic Parakeet model management
-- 🛡️ **Privacy First** - Your voice never leaves your machine with local processing
-- 🎯 **Universal Cursor** - Works in any app - editors, browsers, chat apps, terminals
-- 🚀 **Native Menu Bar** - Lightweight, always-accessible macOS integration
-
-*Perfect companion to MLX-GUI for developers, writers, and anyone who values speed and privacy in voice-to-text workflows.*
 
 ---
 
@@ -114,7 +95,7 @@
 
 </details>
 
-**Download:** [Latest Release](https://github.com/RamboRogers/mlx-gui/releases/latest)
+**Download:** [Latest Release](https://github.com/FahimFarook/mlx-rag/releases/latest)
 
 ## Why ?
 
@@ -166,7 +147,7 @@
 
 ### 🌟 **Language Support Overview**
 
-MLX-GUI features a comprehensive **Retrieval-Augmented Generation (RAG)** system that understands code across **17 programming languages**. From Python to Dart/Flutter, your AI can now provide contextual answers about any codebase.
+MLX-RAG features a comprehensive **Retrieval-Augmented Generation (RAG)** system that understands code across **17 programming languages**. From Python to Dart/Flutter, your AI can now provide contextual answers about any codebase.
 
 #### **✅ Supported Languages**
 
@@ -230,7 +211,7 @@ curl -X POST "http://localhost:8000/v1/chat" \
 uv sync --extra rag-full
 
 # Or via pip
-pip install mlx-gui[rag-full]
+pip install mlx-rag[rag-full]
 ```
 
 #### **Option 2: Install Specific Languages**
@@ -436,7 +417,7 @@ uv run python install_language_parsers.py
 
 # 2. Test the RAG manager directly
 uv run python -c "
-from mlx_gui.rag_manager import get_rag_manager
+from mlx_rag.rag_manager import get_rag_manager
 rag = get_rag_manager()
 print(f'Supported extensions: {list(rag.language_config.keys())}')
 "
@@ -483,7 +464,7 @@ curl -X POST 'http://localhost:8000/v1/rag/query' \
 ## 🏃‍♂️ Quick Start
 
 ### Option 1: Download Standalone App (Recommended for Mac Users)
-1. Download the latest `.app` from [Releases](https://github.com/RamboRogers/mlx-gui/releases)
+1. Download the latest `.app` from [Releases](https://github.com/FahimFarook/mlx-rag/releases)
 2. Drag to `/Applications`
 3. Launch - no Python installation required!
 4. From the menu bar, click the MLX icon to open the admin interface.
@@ -494,30 +475,30 @@ curl -X POST 'http://localhost:8000/v1/rag/query' \
 
 ### Option 2: Install from PyPI
 ```bash
-# Install MLX-GUI
-pip install mlx-gui
+# Install MLX-RAG
+pip install mlx-rag
 
 # Launch with system tray
-mlx-gui tray
+mlx-rag tray
 
 # Or launch server only
-mlx-gui start --port 8000
+mlx-rag start --port 8000
 ```
 
 ### Option 3: Install from Source (with uv - Recommended)
 ```bash
 # Clone the repository
-git clone https://github.com/RamboRogers/mlx-gui.git
-cd mlx-gui
+git clone https://github.com/FahimFarook/mlx-rag.git
+cd mlx-rag
 
 # Install dependencies (10-100x faster than pip)
 uv sync --extra app
 
 # Launch with system tray
-uv run mlx-gui tray
+uv run mlx-rag tray
 
 # Or launch server only
-uv run mlx-gui start --port 8000
+uv run mlx-rag start --port 8000
 ```
 
 > **💡 Why uv?** uv is 10-100x faster than pip and provides better dependency resolution.
@@ -528,7 +509,7 @@ uv run mlx-gui start --port 8000
 
 ### An API Endpoint for [Jan](https://jan.ai) or any other AI app
 
-Simply configure the API endpoint in the app settings to point to your MLX-GUI server. This works with any AI app that supports the OpenAI API. Enter anything for the API key.
+Simply configure the API endpoint in the app settings to point to your MLX-RAG server. This works with any AI app that supports the OpenAI API. Enter anything for the API key.
 
 <div align="center">
 <table>
@@ -685,8 +666,8 @@ Full API documentation is available at `/v1/docs` when the server is running, or
 
 ### Setup Development Environment
 ```bash
-git clone https://github.com/RamboRogers/mlx-gui.git
-cd mlx-gui
+git clone https://github.com/FahimF/mlx-rag.git
+cd mlx-rag
 
 # Install in development mode with audio and vision support
 uv sync --extra dev --extra audio --extra vision
@@ -694,7 +675,7 @@ uv sync --extra dev --extra audio --extra vision
 
 ```bash
 # Start development server in one terminal
-uv run mlx-gui start --log-level debug --reload
+uv run mlx-rag start --log-level debug --reload
 ```
 
 In another terminal ...
@@ -720,7 +701,7 @@ Notes:
 # Build macOS app bundle (script runs `uv sync` automatically)
 uv run ./scripts/build_app.sh
 
-# Result: dist/MLX-GUI.app
+# Result: dist/MLX-RAG.app
 ```
 
 Notes:
@@ -748,7 +729,7 @@ Notes:
 ## ⚖️ License
 
 <p>
-MLX-GUI is licensed under the GNU General Public License v3.0 (GPLv3).<br>
+MLX-RAG is licensed under the GNU General Public License v3.0 (GPLv3).<br>
 <em>Free Software</em>
 </p>
 
@@ -756,9 +737,9 @@ MLX-GUI is licensed under the GNU General Public License v3.0 (GPLv3).<br>
 
 ### Connect With Me 🤝
 
-[![GitHub](https://img.shields.io/badge/GitHub-RamboRogers-181717?style=for-the-badge&logo=github)](https://github.com/RamboRogers)
-[![Twitter](https://img.shields.io/badge/Twitter-@rogerscissp-1DA1F2?style=for-the-badge&logo=twitter)](https://x.com/rogerscissp)
-[![Website](https://img.shields.io/badge/Web-matthewrogers.org-00ADD8?style=for-the-badge&logo=google-chrome)](https://matthewrogers.org)
+[![GitHub](https://img.shields.io/badge/GitHub-FahimFarook-181717?style=for-the-badge&logo=github)](https://github.com/FahimFarook)
+[![Twitter](https://img.shields.io/badge/Twitter-@fahimfarook-1DA1F2?style=for-the-badge&logo=twitter)](https://x.com/FahimFarook)
+[![Website](https://img.shields.io/badge/Web-farook.org-00ADD8?style=for-the-badge&logo=google-chrome)](https://bio.farook.org)
 
 ## 🙏 Acknowledgments
 
@@ -769,7 +750,7 @@ MLX-GUI is licensed under the GNU General Public License v3.0 (GPLv3).<br>
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=RamboRogers/mlx-gui&type=Timeline)](https://www.star-history.com/#RamboRogers/mlx-gui&Timeline)
+[![Star History Chart](https://api.star-history.com/svg?repos=FahimFarook/mlx-rag&type=Timeline)](https://www.star-history.com/#FahimFarook/mlx-rag&Timeline)
 
 ---
 

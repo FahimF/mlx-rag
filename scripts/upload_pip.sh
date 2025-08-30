@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# upload_pip.sh - Automated PyPI publishing script for mlx-gui using uv
+# upload_pip.sh - Automated PyPI publishing script for mlx-rag using uv
 # Usage: ./scripts/upload_pip.sh
 
 set -e  # Exit on any error
 
-echo "🚀 MLX-GUI PyPI Upload Script (UV)"
+echo "🚀 MLX-RAG PyPI Upload Script (UV)"
 echo "===================================="
 
 # Check if we're in the right directory
@@ -54,7 +54,7 @@ echo "📋 Version to upload: $VERSION"
 
 # Ask for confirmation
 echo ""
-read -p "🔥 Ready to upload mlx-gui v$VERSION to PyPI? (y/N): " -n 1 -r
+read -p "🔥 Ready to upload mlx-rag v$VERSION to PyPI? (y/N): " -n 1 -r
 echo ""
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -62,13 +62,13 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     uv run twine upload dist/*
     
     echo ""
-    echo "🎉 Success! MLX-GUI v$VERSION published to PyPI!"
-    echo "📦 Package URL: https://pypi.org/project/mlx-gui/$VERSION/"
-    echo "💡 Users can now install with: pip install mlx-gui"
+    echo "🎉 Success! MLX-RAG v$VERSION published to PyPI!"
+    echo "📦 Package URL: https://pypi.org/project/mlx-rag/$VERSION/"
+    echo "💡 Users can now install with: pip install mlx-rag"
     echo ""
     echo "🔗 Next steps:"
     echo "   1. Update GitHub release notes"
-    echo "   2. Test installation: pip install mlx-gui==$VERSION"
+    echo "   2. Test installation: pip install mlx-rag==$VERSION"
     echo "   3. Announce the release!"
 else
     echo "❌ Upload cancelled."

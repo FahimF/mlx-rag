@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MLX-GUI is a **production-ready** lightweight RESTful wrapper around Apple's MLX engine for dynamically loading and serving MLX-compatible models. The project is a complete inference server with GUI, system tray integration, and comprehensive model management capabilities.
+MLX-RAG is a **production-ready** lightweight RESTful wrapper around Apple's MLX engine for dynamically loading and serving MLX-compatible models. The project is a complete inference server with GUI, system tray integration, and comprehensive model management capabilities.
 
 ## Current Status
 
@@ -45,7 +45,7 @@ The project is fully implemented with proper packaging:
 1. **Python Environment**: Requires Python 3.11+ with MLX dependencies
 2. **Package Structure**: Complete Python package with `pyproject.toml`
 3. **Dependencies**: All dependencies managed including MLX, FastAPI, SQLite, audio/vision support
-4. **CLI Interface**: Full CLI with `mlx-gui start --port 8000` and `mlx-gui tray`
+4. **CLI Interface**: Full CLI with `mlx-rag start --port 8000` and `mlx-rag tray`
 
 ## API Design
 
@@ -142,7 +142,7 @@ The project includes a comprehensive test suite (`tests/test_unified_mlx.py`) th
 
 Available as:
 1. **Standalone macOS App** - No Python required, drag-and-drop installation
-2. **PyPI Package** - `pip install mlx-gui`
+2. **PyPI Package** - `pip install mlx-rag`
 3. **Source Installation** - Full development setup
 
 The project is production-ready and actively maintained with regular releases.

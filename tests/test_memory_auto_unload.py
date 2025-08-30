@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🧠 MLX-GUI Memory Auto-Unload Test
+🧠 MLX-RAG Memory Auto-Unload Test
 Specifically tests the automatic LRU unloading when hitting concurrent model limits
 """
 
@@ -129,8 +129,8 @@ async def main():
         traceback.print_exc()
 
 if __name__ == "__main__":
-    print("🚀 Starting MLX-GUI Auto-Unload Test...")
-    print("📋 Make sure MLX-GUI server is running on http://localhost:8000")
+    print("🚀 Starting MLX-RAG Auto-Unload Test...")
+    print("📋 Make sure MLX-RAG server is running on http://localhost:8000")
     print()
 
     asyncio.run(main())

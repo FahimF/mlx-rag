@@ -1,6 +1,6 @@
-# Plan for Chat Feature in MLX-GUI
+# Plan for Chat Feature in MLX-RAG
 
-This document outlines the plan for adding a new "Chat" tab to the `mlx-gui` admin panel.
+This document outlines the plan for adding a new "Chat" tab to the `mlx-rag` admin panel.
 
 ### 1. High-Level Goal
 
@@ -54,4 +54,4 @@ The primary objective is to create a new "Chat" tab that serves as an interactiv
 3.  **Backend Endpoint:** I will then implement the `/v1/chat` endpoint in `server.py`, integrating the `RAGManager` and `ModelManager` to orchestrate the full chat logic.
 4.  **Streaming Implementation:** I will ensure the backend properly streams the response, and the frontend can correctly handle and display the incoming tokens in real-time.
 
-This plan will deliver a robust and feature-rich chat experience that seamlessly integrates with the existing model and RAG management capabilities of `mlx-gui`.
+This plan will deliver a robust and feature-rich chat experience that seamlessly integrates with the existing model and RAG management capabilities of `mlx-rag`.

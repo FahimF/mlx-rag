@@ -182,7 +182,7 @@ claude-*.md
 *.swo
 *~
 
-# MLX-GUI specific
+# MLX-RAG specific
 *.db
 *.sqlite
 *.sqlite3
@@ -248,7 +248,7 @@ generation_config.json
 *.rar
 *.7z
 
-# Keep MLX-GUI assets
+# Keep MLX-RAG assets
 !src/mlx_gui/assets/
 !src/mlx_gui/assets/*.png
 !src/mlx_gui/assets/*.ico

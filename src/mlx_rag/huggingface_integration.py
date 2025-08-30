@@ -1,5 +1,5 @@
 """
-HuggingFace integration for MLX-GUI.
+HuggingFace integration for MLX-RAG.
 Handles model discovery, metadata extraction, and compatibility checking.
 """
 

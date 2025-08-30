@@ -1,5 +1,5 @@
 """
-Command-line interface for MLX-GUI.
+Command-line interface for MLX-RAG.
 """
 
 import asyncio
@@ -13,13 +13,13 @@ import uvicorn
 from rich.console import Console
 from rich.table import Table
 
-from mlx_gui.database import get_database_manager
-from mlx_gui.server import create_app
-from mlx_gui.huggingface_integration import get_huggingface_client
+from mlx_rag.database import get_database_manager
+from mlx_rag.server import create_app
+from mlx_rag.huggingface_integration import get_huggingface_client
 
 app = typer.Typer(
-    name="mlx-gui",
-    help="MLX-GUI: A lightweight RESTful wrapper around Apple's MLX engine",
+    name="mlx-rag",
+    help="MLX-RAG: A lightweight RESTful wrapper around Apple's MLX engine with RAG support",
     add_completion=False,
 )
 
@@ -35,22 +35,22 @@ def start(
     log_level: str = typer.Option("info", "--log-level", "-l", help="Log level"),
     database_path: Optional[str] = typer.Option(None, "--database", "-d", help="Custom database path"),
 ):
-    """Start the MLX-GUI server."""
+    """Start the MLX-RAG server."""
     # Print ASCII art banner
     console.print("""
-███╗   ███╗██╗     ██╗  ██╗      ██████╗ ██╗   ██╗██╗
-████╗ ████║██║     ╚██╗██╔╝     ██╔════╝ ██║   ██║██║
-██╔████╔██║██║      ╚███╔╝█████╗██║  ███╗██║   ██║██║
-██║╚██╔╝██║██║      ██╔██╗╚════╝██║   ██║██║   ██║██║
-██║ ╚═╝ ██║███████╗██╔╝ ██╗     ╚██████╔╝╚██████╔╝██║
-╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝      ╚═════╝  ╚═════╝ ╚═╝
-""", style="cyan")
+███╗   ███╗██╗     ██╗  ██╗      ██████╗  █████╗  ██████╗ 
+████╗ ████║██║     ╚██╗██╔╝      ██╔══██╗██╔══██╗██╔════╝ 
+██╔████╔██║██║      ╚███╔╝ █████╗██████╔╝███████║██║  ███╗
+██║╚██╔╝██║██║      ██╔██╗ ╚════╝██╔══██╗██╔══██║██║   ██║
+██║ ╚═╝ ██║███████╗██╔╝ ██╗      ██║  ██║██║  ██║╚██████╔╝
+╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝      ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ 
+""", style="green")
     
-    from mlx_gui import __version__
-    console.print("MLX-GUI - Apple Silicon AI Model Server", style="bold white")
+    from mlx_rag import __version__
+    console.print("MLX-RAG - Apple Silicon AI Model Server", style="bold white")
     console.print(f"Version {__version__}", style="bold green")
-    console.print("By Matthew Rogers (@RamboRogers)", style="dim white")
-    console.print("https://github.com/RamboRogers/mlx-gui", style="blue")
+    console.print("By Fahim Farook (based on work by Matthew Rogers)", style="dim white")
+    console.print("https://github.com/FahimF/mlx-rag", style="blue")
     console.print()
     
     # Initialize database
@@ -70,7 +70,7 @@ def start(
         bind_to_all = db_manager.get_setting("bind_to_all_interfaces", False)
         actual_host = "0.0.0.0" if bind_to_all else "127.0.0.1"
     
-    console.print(f"🚀 Starting MLX-GUI server on {actual_host}:{actual_port}", style="green")
+    console.print(f"🚀 Starting MLX-RAG server on {actual_host}:{actual_port}", style="green")
     if port is None:
         console.print(f"   📊 Using port from database setting: {actual_port}", style="dim blue")
     else:
@@ -101,7 +101,7 @@ def start(
         # Run the server - should exit cleanly now with daemon threads
         asyncio.run(server.serve())
     except KeyboardInterrupt:
-        console.print("\n👋 Shutting down MLX-GUI server...", style="yellow")
+        console.print("\n👋 Shutting down MLX-RAG server...", style="yellow")
     except Exception as e:
         console.print(f"❌ Error starting server: {e}", style="red")
         sys.exit(1)
@@ -110,7 +110,7 @@ def start(
 @app.command()
 def status():
     """Show server and database status."""
-    console.print("📊 MLX-GUI Status", style="bold blue")
+    console.print("📊 MLX-RAG Status", style="bold blue")
     
     # Database status
     try:
@@ -140,7 +140,7 @@ def models():
     try:
         db_manager = get_database_manager()
         with db_manager.get_session() as session:
-            from mlx_gui.models import Model
+            from mlx_rag.models import Model
             
             models = session.query(Model).all()
             
@@ -201,7 +201,7 @@ def config():
         db_manager = get_database_manager()
         
         with db_manager.get_session() as session:
-            from mlx_gui.models import AppSettings
+            from mlx_rag.models import AppSettings
             
             settings = session.query(AppSettings).all()
             
@@ -284,24 +284,24 @@ def tray(
     port: Optional[int] = typer.Option(None, "--port", "-p", help="Port to run the server on (overrides database setting)"),
     host: Optional[str] = typer.Option(None, "--host", "-h", help="Host to bind to (overrides database setting)"),
 ):
-    """Launch MLX-GUI with macOS system tray interface."""
+    """Launch MLX-RAG with macOS system tray interface."""
     # Print ASCII art banner
     console.print("""
-███╗   ███╗██╗     ██╗  ██╗      ██████╗ ██╗   ██╗██╗
-████╗ ████║██║     ╚██╗██╔╝     ██╔════╝ ██║   ██║██║
-██╔████╔██║██║      ╚███╔╝█████╗██║  ███╗██║   ██║██║
-██║╚██╔╝██║██║      ██╔██╗╚════╝██║   ██║██║   ██║██║
-██║ ╚═╝ ██║███████╗██╔╝ ██╗     ╚██████╔╝╚██████╔╝██║
-╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝      ╚═════╝  ╚═════╝ ╚═╝
-""", style="cyan")
+███╗   ███╗██╗     ██╗  ██╗      ██████╗  █████╗  ██████╗ 
+████╗ ████║██║     ╚██╗██╔╝      ██╔══██╗██╔══██╗██╔════╝ 
+██╔████╔██║██║      ╚███╔╝ █████╗██████╔╝███████║██║  ███╗
+██║╚██╔╝██║██║      ██╔██╗ ╚════╝██╔══██╗██╔══██║██║   ██║
+██║ ╚═╝ ██║███████╗██╔╝ ██╗      ██║  ██║██║  ██║╚██████╔╝
+╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝      ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ 
+""", style="green")
     
-    from mlx_gui import __version__
-    console.print("MLX-GUI - Apple Silicon AI Model Server", style="bold white")
+    from mlx_rag import __version__
+    console.print("MLX-RAG - Apple Silicon AI Model Server", style="bold white")
     console.print(f"Version {__version__}", style="bold green")
-    console.print("By Matthew Rogers (@RamboRogers)", style="dim white") 
-    console.print("https://github.com/RamboRogers/mlx-gui", style="blue")
+    console.print("By Fahim Farook (based on work by Matthew Rogers)", style="dim white") 
+    console.print("https://github.com/FahimF/mlx-rag", style="blue")
     console.print()
-    console.print("🍎 Starting MLX-GUI with system tray interface...", style="green")
+    console.print("🍎 Starting MLX-RAG with system tray interface...", style="green")
     
     # Get port and host from database settings, allow CLI overrides
     db_manager = get_database_manager()
@@ -322,7 +322,7 @@ def tray(
         console.print(f"   📊 Using bind setting from database: {'all interfaces (0.0.0.0)' if bind_to_all else 'localhost only (127.0.0.1)'}", style="dim blue")
     
     try:
-        from mlx_gui.tray import run_tray_app
+        from mlx_rag.tray import run_tray_app
         success = run_tray_app(port=actual_port, host=actual_host)
         if not success:
             sys.exit(1)
@@ -354,8 +354,8 @@ def update_sizes():
 @app.command()
 def version():
     """Show version information."""
-    from mlx_gui import __version__
-    console.print(f"MLX-GUI version: {__version__}", style="green")
+    from mlx_rag import __version__
+    console.print(f"MLX-RAG version: {__version__}", style="green")
 
 
 def main():

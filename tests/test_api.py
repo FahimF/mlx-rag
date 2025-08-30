@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Quick test of the MLX-GUI API endpoints."""
+"""Quick test of the MLX-RAG API endpoints."""
 
 import asyncio
 import httpx
-from mlx_gui.server import create_app
-from mlx_gui.huggingface_integration import get_huggingface_client
+from mlx_rag.server import create_app
+from mlx_rag.huggingface_integration import get_huggingface_client
 
 async def test_hf_integration():
     """Test HuggingFace integration directly."""

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for API key validation in MLX-GUI OpenAI endpoints.
+Test script for API key validation in MLX-RAG OpenAI endpoints.
 """
 import requests
 import json

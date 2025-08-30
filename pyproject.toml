@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mlx-gui"
+name = "mlx-rag"
 version = "1.2.4"
 description = "A lightweight RESTful wrapper around Apple's MLX engine for dynamically loading and serving MLX-compatible models"
 readme = "README.md"
@@ -109,15 +109,15 @@ rag-full = [
 ]
 
 [project.scripts]
-mlx-gui = "mlx_gui.cli:main"
+mlx-rag = "mlx_rag.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/ramborogers/mlx-gui"
-Repository = "https://github.com/ramborogers/mlx-gui"
-Issues = "https://github.com/ramborogers/mlx-gui/issues"
+Homepage = "https://github.com/FahimF/mlx-rag"
+Repository = "https://github.com/FahimF/mlx-rag"
+Issues = "https://github.com/FahimF/mlx-rag/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mlx_gui"]
+packages = ["src/mlx_rag"]
 
 [tool.hatch.build.targets.sdist]
 include = [

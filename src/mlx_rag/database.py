@@ -1,5 +1,5 @@
 """
-Database connection and initialization for MLX-GUI.
+Database connection and initialization for MLX-RAG.
 """
 
 import os
@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine
 
-from mlx_gui.models import Base, AppSettings
+from mlx_rag.models import Base, AppSettings
 
 
 class DatabaseManager:
@@ -25,9 +25,9 @@ class DatabaseManager:
         """
         if database_path is None:
             # Use standard user application directory
-            app_dir = appdirs.user_data_dir("mlx-gui", "mlx-gui")
+            app_dir = appdirs.user_data_dir("mlx-rag", "mlx-rag")
             os.makedirs(app_dir, exist_ok=True)
-            database_path = os.path.join(app_dir, "mlx-gui.db")
+            database_path = os.path.join(app_dir, "mlx-rag.db")
         
         self.database_path = database_path
         self.db_dir = os.path.dirname(database_path)
@@ -101,7 +101,7 @@ class DatabaseManager:
         """Reset all model statuses to unloaded on startup."""
         try:
             with self.get_session() as session:
-                from mlx_gui.models import Model
+                from mlx_rag.models import Model
                 # Set all models to unloaded status
                 models = session.query(Model).all()
                 for model in models:
@@ -168,7 +168,7 @@ class DatabaseManager:
         """Update model memory requirements based on actual file sizes."""
         try:
             with self.get_session() as session:
-                from mlx_gui.models import Model
+                from mlx_rag.models import Model
                 import os
                 
                 models = session.query(Model).all()
@@ -232,7 +232,7 @@ class DatabaseManager:
         # If it looks like a HuggingFace model ID, find it in cache
         if "/" in model_path and not os.path.exists(model_path):
             # Convert HF model ID to cache path
-            cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "mlx-gui")
+            cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "mlx-rag")
             
             # Convert model ID to cache directory name
             # "lmstudio-community/DeepSeek-R1-0528-Qwen3-8B-MLX-4bit" -> "models--lmstudio-community--DeepSeek-R1-0528-Qwen3-8B-MLX-4bit"

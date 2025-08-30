@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🔗 MLX-GUI Comprehensive Embedding Test Suite
+🔗 MLX-RAG Comprehensive Embedding Test Suite
 
 Tests all supported MLX embedding models for:
 - Proper dimension output
@@ -335,7 +335,7 @@ class EmbeddingTestSuite:
             return []
         except Exception as e:
             print(f"❌ Error getting available models: {e}")
-            print(f"   Make sure MLX-GUI server is running on {BASE_URL}")
+            print(f"   Make sure MLX-RAG server is running on {BASE_URL}")
             return []
     
     async def test_embedding_model(self, spec: EmbeddingModelSpec) -> EmbeddingTestResult:

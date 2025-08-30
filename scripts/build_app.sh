@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# MLX-GUI macOS App Builder
+# MLX-RAG macOS App Builder
 # This script builds a TRUE standalone macOS app bundle using PyInstaller
 
 set -e
 
-echo "🚀 Building MLX-GUI macOS App Bundle (TRUE STANDALONE)..."
+echo "🚀 Building MLX-RAG macOS App Bundle (TRUE STANDALONE)..."
 
 # Check if we're in the right directory
 if [ ! -f "pyproject.toml" ]; then
@@ -74,9 +74,9 @@ except ImportError:
 
 # Clean previous builds
 echo "🧹 Cleaning previous builds..."
-pkill -f MLX-GUI || true
+pkill -f MLX-RAG || true
 sleep 2
-rm -rf build/ dist/ MLX-GUI.spec app_icon.icns 2>/dev/null || true
+rm -rf build/ dist/ MLX-RAG.spec app_icon.icns 2>/dev/null || true
 
 # Create app icon from PNG
 echo "🎨 Creating app icon from ./icon.png..."
@@ -491,7 +491,7 @@ cat > "$ALL_FIXES_HOOK" << EOL
 import sys
 import os
 
-print("--- Running MLX-GUI Runtime Fixes ---")
+print("--- Running MLX-RAG Runtime Fixes ---")
 
 # -- Fix for ffmpeg/av --
 try:
@@ -752,8 +752,8 @@ EOL
 # Base PyInstaller command
 PYINSTALLER_CMD=(
     "pyinstaller"
-    "src/mlx_gui/app_main.py"
-    "--name" "MLX-GUI"
+    "src/mlx_rag/app_main.py"
+    "--name" "MLX-RAG"
     "--windowed"
     "--noconfirm"
     "--clean"
@@ -761,7 +761,7 @@ PYINSTALLER_CMD=(
     "--additional-hooks-dir" "hooks"
     "--runtime-hook" "$ALL_FIXES_HOOK"
     "--icon" "app_icon.icns"
-    "--osx-bundle-identifier" "org.matthewrogers.mlx-gui"
+    "--osx-bundle-identifier" "org.farook.mlx-rag"
     "--copy-metadata" "tqdm"
     "--copy-metadata" "regex"
     "--copy-metadata" "safetensors"
@@ -843,7 +843,7 @@ echo "📝 Building version: $VERSION"
 
 # Create a custom .spec file for maximum control over SSL library exclusion
 echo "🔨 Creating custom spec file for SSL conflict resolution..."
-cat > MLX-GUI.spec << 'SPEC_EOF'
+cat > MLX-RAG.spec << 'SPEC_EOF'
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
@@ -982,7 +982,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='MLX-GUI',
+    name='MLX-RAG',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -1003,14 +1003,14 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='MLX-GUI',
+    name='MLX-RAG',
 )
 
 app = BUNDLE(
     coll,
-    name='MLX-GUI.app',
+    name='MLX-RAG.app',
     icon='app_icon.icns',
-    bundle_identifier='org.matthewrogers.mlx-gui',
+    bundle_identifier='org.farook.mlx-rag',
     info_plist={
         'LSUIElement': True,
         'CFBundleShortVersionString': '1.2.1',
@@ -1022,20 +1022,20 @@ SPEC_EOF
 
 # Run PyInstaller with the custom spec file using UV
 echo "🔨 Building app bundle with custom spec file..."
-uv run pyinstaller MLX-GUI.spec --noconfirm --clean
+uv run pyinstaller MLX-RAG.spec --noconfirm --clean
 
 # Clean up temporary hook files
 echo "🧹 Cleaning up temporary hook files..."
 rm -rf "$HOOKS_DIR"
 
 # Check if build was successful
-if [ -d "dist/MLX-GUI.app" ]; then
+if [ -d "dist/MLX-RAG.app" ]; then
     echo "✅ App bundle built successfully!"
-    echo "📍 Location: dist/MLX-GUI.app"
+    echo "📍 Location: dist/MLX-RAG.app"
 
     # Fix the Info.plist to make it a menu bar app (no dock icon) - BEFORE signing
     echo "🔧 Converting to menu bar app (removing dock icon)..."
-    INFO_PLIST="dist/MLX-GUI.app/Contents/Info.plist"
+    INFO_PLIST="dist/MLX-RAG.app/Contents/Info.plist"
 
     if [ -f "$INFO_PLIST" ]; then
         # Add LSUIElement=true to make it a menu bar app
@@ -1069,17 +1069,17 @@ if [ -d "dist/MLX-GUI.app" ]; then
         echo "🔏 Signing app bundle..."
 
         # Sign all executables and libraries first (deep signing)
-        codesign --force --deep --sign "$CERT_NAME" --options runtime --entitlements scripts/entitlements.plist "dist/MLX-GUI.app"
+        codesign --force --deep --sign "$CERT_NAME" --options runtime --entitlements scripts/entitlements.plist "dist/MLX-RAG.app"
 
         # Verify the signature
-        if codesign --verify --verbose "dist/MLX-GUI.app" 2>/dev/null; then
+        if codesign --verify --verbose "dist/MLX-RAG.app" 2>/dev/null; then
             echo "✅ App successfully signed!"
             echo "🛡️  This will eliminate macOS security warnings"
 
             # Show signature info
             echo ""
             echo "📜 Signature Info:"
-            codesign -dv --verbose=4 "dist/MLX-GUI.app" 2>&1 | grep -E "(Identifier|TeamIdentifier|Authority)"
+            codesign -dv --verbose=4 "dist/MLX-RAG.app" 2>&1 | grep -E "(Identifier|TeamIdentifier|Authority)"
         else
             echo "⚠️  Warning: Code signing verification failed"
             echo "   The app was built but may show security warnings"
@@ -1096,12 +1096,12 @@ if [ -d "dist/MLX-GUI.app" ]; then
 
     echo ""
     echo "🎉 You can now:"
-    echo "   1. Run: open dist/MLX-GUI.app"
-    echo "   2. Copy to /Applications: cp -R dist/MLX-GUI.app /Applications/"
+    echo "   1. Run: open dist/MLX-RAG.app"
+    echo "   2. Copy to /Applications: cp -R dist/MLX-RAG.app /Applications/"
     echo "   3. Create a DMG installer"
     echo ""
     echo "📋 App Info:"
-    echo "   - Size: $(du -sh dist/MLX-GUI.app | cut -f1)"
+    echo "   - Size: $(du -sh dist/MLX-RAG.app | cut -f1)"
     echo "   - Type: TRUE STANDALONE (no Python required!)"
     echo "   - Includes: All Python runtime, MLX binaries, audio & vision support, and dependencies"
     if [ -n "$CERT_NAME" ]; then
@@ -1115,14 +1115,14 @@ if [ -d "dist/MLX-GUI.app" ]; then
     echo "   - No virtual environment needed"
     echo "   - Fully self-contained"
 else
-    echo "❌ Build failed! App bundle not found at dist/MLX-GUI.app"
+    echo "❌ Build failed! App bundle not found at dist/MLX-RAG.app"
     echo "   Check the output above for errors."
     exit 1
 fi
 
 echo ""
 echo "🔗 Next steps:"
-echo "   • Test the app: open dist/MLX-GUI.app"
+echo "   • Test the app: open dist/MLX-RAG.app"
 echo "   • Create DMG installer for easy distribution"
 echo "   • App is ready for sharing with anyone - no setup required!"
 echo "   • Audio & Vision support included: Whisper, Parakeet, and MLX-VLM models work out of the box (filtered OpenCV - no SSL conflicts)"

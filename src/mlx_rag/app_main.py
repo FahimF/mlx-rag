@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MLX-GUI macOS App Entry Point
+MLX-RAG macOS App Entry Point
 Dedicated entry point for the macOS app bundle.
 """
 
@@ -43,9 +43,9 @@ def setup_app_environment():
             print("⚠️  FFmpeg binaries not found in app bundle - audio transcription may not work")
 
         # Set up logging to file in user's home directory
-        log_dir = Path.home() / "Library" / "Logs" / "MLX-GUI"
+        log_dir = Path.home() / "Library" / "Logs" / "MLX-RAG"
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / "mlx-gui.log"
+        log_file = log_dir / "mlx-rag.log"
 
         logging.basicConfig(
             level=logging.INFO,
@@ -57,40 +57,43 @@ def setup_app_environment():
         )
 
         print("""
-███╗   ███╗██╗     ██╗  ██╗      ██████╗ ██╗   ██╗██╗
-████╗ ████║██║     ╚██╗██╔╝     ██╔════╝ ██║   ██║██║
-██╔████╔██║██║      ╚███╔╝█████╗██║  ███╗██║   ██║██║
-██║╚██╔╝██║██║      ██╔██╗╚════╝██║   ██║██║   ██║██║
-██║ ╚═╝ ██║███████╗██╔╝ ██╗     ╚██████╔╝╚██████╔╝██║
-╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝      ╚═════╝  ╚═════╝ ╚═╝
+███╗   ███╗██╗     ██╗  ██╗      ██████╗  █████╗  ██████╗ 
+████╗ ████║██║     ╚██╗██╔╝      ██╔══██╗██╔══██╗██╔════╝ 
+██╔████╔██║██║      ╚███╔╝ █████╗██████╔╝███████║██║  ███╗
+██║╚██╔╝██║██║      ██╔██╗ ╚════╝██╔══██╗██╔══██║██║   ██║
+██║ ╚═╝ ██║███████╗██╔╝ ██╗      ██║  ██║██║  ██║╚██████╔╝
+╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝      ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ 
         """)
-        from mlx_gui import __version__
-        print("MLX-GUI - Apple Silicon AI Model Server")
+
+        from mlx_rag import __version__
+        print("MLX-RAG - Apple Silicon AI Model Server")
         print(f"Version {__version__}")
-        print("By Matthew Rogers (@RamboRogers)")
-        print("https://github.com/RamboRogers/mlx-gui")
+        print("By Fahim Farook (based on work by Matthew Rogers)")
+        print("https://github.com/FahimF/mlx-rag")
         print()
-        print(f"MLX-GUI App Bundle starting...")
+        print(f"MLX-RAG App Bundle starting...")
         print(f"Logs: {log_file}")
 
     else:
         # Running in development
         logging.basicConfig(level=logging.INFO)
+        
         print("""
-███╗   ███╗██╗     ██╗  ██╗      ██████╗ ██╗   ██╗██╗
-████╗ ████║██║     ╚██╗██╔╝     ██╔════╝ ██║   ██║██║
-██╔████╔██║██║      ╚███╔╝█████╗██║  ███╗██║   ██║██║
-██║╚██╔╝██║██║      ██╔██╗╚════╝██║   ██║██║   ██║██║
-██║ ╚═╝ ██║███████╗██╔╝ ██╗     ╚██████╔╝╚██████╔╝██║
-╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝      ╚═════╝  ╚═════╝ ╚═╝
+███╗   ███╗██╗     ██╗  ██╗      ██████╗  █████╗  ██████╗ 
+████╗ ████║██║     ╚██╗██╔╝      ██╔══██╗██╔══██╗██╔════╝ 
+██╔████╔██║██║      ╚███╔╝ █████╗██████╔╝███████║██║  ███╗
+██║╚██╔╝██║██║      ██╔██╗ ╚════╝██╔══██╗██╔══██║██║   ██║
+██║ ╚═╝ ██║███████╗██╔╝ ██╗      ██║  ██║██║  ██║╚██████╔╝
+╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝      ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ 
         """)
-        from mlx_gui import __version__
-        print("MLX-GUI - Apple Silicon AI Model Server")
+        
+        from mlx_rag import __version__
+        print("MLX-RAG - Apple Silicon AI Model Server")
         print(f"Version {__version__}")
-        print("By Matthew Rogers (@RamboRogers)")
-        print("https://github.com/RamboRogers/mlx-gui")
+        print("By Fahim Farook (based on work by Matthew Rogers)")
+        print("https://github.com/FahimF/mlx-rag")
         print()
-        print("MLX-GUI running in development mode")
+        print("MLX-RAG running in development mode")
 
 def main():
     """Main entry point for the macOS app."""
@@ -107,9 +110,9 @@ def main():
             sys.exit(1)
 
         # Import and run the tray app
-        from mlx_gui.tray import run_tray_app
+        from mlx_rag.tray import run_tray_app
 
-        print("Starting MLX-GUI tray app...")
+        print("Starting MLX-RAG tray app...")
 
         # Check for audio dependencies
         audio_modules = []
@@ -130,21 +133,21 @@ def main():
         else:
             print("Audio support: ⚠️  No audio libraries found")
             print("Install with: pip install mlx-whisper parakeet-mlx")
-            print("MLX-GUI will work without audio support, but audio transcription won't be available.")
+            print("MLX-RAG will work without audio support, but audio transcription won't be available.")
 
         # Start with default settings
         success = run_tray_app(port=8000, host="127.0.0.1")
 
         if not success:
-            print("Failed to start MLX-GUI tray app")
+            print("Failed to start MLX-RAG tray app")
             sys.exit(1)
 
     except KeyboardInterrupt:
-        print("\nMLX-GUI shutting down...")
+        print("\nMLX-RAG shutting down...")
         sys.exit(0)
     except Exception as e:
-        print(f"Error starting MLX-GUI: {e}")
-        logging.exception("Error starting MLX-GUI")
+        print(f"Error starting MLX-RAG: {e}")
+        logging.exception("Error starting MLX-RAG")
         # Don't exit immediately - let user see the error
         input("Press Enter to exit...")
         sys.exit(1)

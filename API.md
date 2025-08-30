@@ -1,6 +1,6 @@
-# MLX-GUI API Documentation
+# MLX-RAG API Documentation
 
-MLX-GUI provides a comprehensive REST API for managing and running MLX models on Apple Silicon. The API follows RESTful conventions and includes OpenAI-compatible endpoints for easy integration.
+MLX-RAG provides a comprehensive REST API for managing and running MLX models on Apple Silicon. The API follows RESTful conventions and includes OpenAI-compatible endpoints for easy integration.
 
 ## Base URL
 
@@ -12,7 +12,7 @@ http://localhost:8000
 
 ### API Keys (OpenAI Compatible)
 
-MLX-GUI accepts API keys for OpenAI compatibility but **accepts any key**:
+MLX-RAG accepts API keys for OpenAI compatibility but **accepts any key**:
 
 **Bearer Token:**
 ```bash
@@ -46,7 +46,7 @@ Root endpoint with basic server information.
 **Response:**
 ```json
 {
-  "name": "MLX-GUI API",
+  "name": "MLX-RAG API",
       "version": "1.2.0",
   "status": "running"
 }
@@ -124,7 +124,7 @@ Restart the server with updated settings.
 
 ## Memory Management
 
-MLX-GUI features advanced memory management with automatic model unloading:
+MLX-RAG features advanced memory management with automatic model unloading:
 
 ### Three-Layer Memory Protection
 
@@ -730,7 +730,7 @@ Hello, this is a test of the audio transcription system.
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="any-key",  # MLX-GUI accepts any key
+    api_key="any-key",  # MLX-RAG accepts any key
     base_url="http://localhost:8000/v1"
 )
 
@@ -811,7 +811,7 @@ Generate speech from text (endpoint defined, implementation pending).
 ## Audio Model Support
 
 ### Supported Audio Libraries
-MLX-GUI supports multiple audio processing libraries:
+MLX-RAG supports multiple audio processing libraries:
 
 - **MLX-Whisper** (`mlx-whisper>=0.12.0`)
   - OpenAI Whisper models optimized for Apple Silicon
@@ -837,7 +837,7 @@ pip install mlx-whisper>=0.12.0
 pip install parakeet-mlx
 
 # Or install with audio support
-pip install mlx-gui[audio]
+pip install mlx-rag[audio]
 ```
 
 ### Supported Audio Formats
@@ -856,7 +856,7 @@ pip install mlx-gui[audio]
 
 ### Vision/Image Models
 
-MLX-GUI now supports vision and multimodal models using MLX-VLM for image understanding. These models can process both text and images in chat conversations.
+MLX-RAG now supports vision and multimodal models using MLX-VLM for image understanding. These models can process both text and images in chat conversations.
 
 #### Supported Vision Models
 
@@ -871,7 +871,7 @@ Vision model support requires MLX-VLM:
 
 ```bash
 # Install with vision support
-pip install mlx-gui[vision]
+pip install mlx-rag[vision]
 
 # Or install MLX-VLM separately
 pip install mlx-vlm>=0.1.0
@@ -1003,7 +1003,7 @@ Vision models return the same OpenAI-compatible response format as text models:
 
 #### Model Auto-Detection
 
-MLX-GUI automatically detects vision models based on:
+MLX-RAG automatically detects vision models based on:
 
 - Model path containing keywords: `vision`, `vlm`, `multimodal`, `llava`, `qwen2-vl`, `idefics`, `gemma-3`
 - Model architecture in `config.json`
@@ -1032,7 +1032,7 @@ curl -X POST http://localhost:8000/v1/models/install \
 
 #### Architecture
 
-MLX-GUI uses MLX-VLM for vision model support:
+MLX-RAG uses MLX-VLM for vision model support:
 - **MLX-LM**: For text-only models
 - **MLX-VLM**: For vision/multimodal models with image processing
 - **Automatic fallback**: If MLX-VLM fails, falls back to MLX-LM text generation
@@ -1043,7 +1043,7 @@ MLX-GUI uses MLX-VLM for vision model support:
 
 ### Current Support
 
-MLX-GUI provides **full OpenAI API compatibility** for drop-in replacement:
+MLX-RAG provides **full OpenAI API compatibility** for drop-in replacement:
 
 #### ✅ **Fully Implemented:**
 - **`POST /v1/chat/completions`** - Chat completions with streaming support
@@ -1066,7 +1066,7 @@ MLX-GUI provides **full OpenAI API compatibility** for drop-in replacement:
 
 ### Drop-in Replacement
 
-MLX-GUI is now **fully OpenAI-compatible**! Simply:
+MLX-RAG is now **fully OpenAI-compatible**! Simply:
 
 1. **Replace base URL**: Change from `https://api.openai.com` to `http://localhost:8000`
 2. **Install models**: Use `POST /v1/models/install` to add models dynamically
@@ -1177,7 +1177,7 @@ curl -X GET http://localhost:8000/v1/models \
       "id": "qwen3-8b-6bit",
       "object": "model",
       "created": 1751234567,
-      "owned_by": "mlx-gui",
+      "owned_by": "mlx-rag",
       "permission": [],
       "root": "qwen3-8b-6bit",
       "parent": null

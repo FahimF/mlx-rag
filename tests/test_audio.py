@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script for MLX-GUI audio transcription endpoint.
+Test script for MLX-RAG audio transcription endpoint.
 Tests the /v1/audio/transcriptions endpoint with parakeet-tdt-0-6b-v2 model.
 """
 
@@ -48,7 +48,7 @@ def test_audio_transcription():
     }
 
     try:
-        print("📡 Sending request to MLX-GUI...")
+        print("📡 Sending request to MLX-RAG...")
         response = requests.post(url, files=files, data=data)
 
         # Close the file
@@ -90,9 +90,9 @@ def test_audio_transcription():
         assert response.status_code == 200
 
     except requests.exceptions.ConnectionError:
-        print("❌ Error: Cannot connect to MLX-GUI server")
+        print("❌ Error: Cannot connect to MLX-RAG server")
         print("   Make sure the server is running on http://localhost:8000")
-        assert False, "Cannot connect to MLX-GUI server"
+        assert False, "Cannot connect to MLX-RAG server"
 
     except Exception as e:
         print(f"❌ Error: {e}")
@@ -114,7 +114,7 @@ def check_model_status():
 
             if status != 'loaded':
                 print(f"⚠️  Model '{MODEL}' is not loaded. It should load automatically on first use.")
-                # Skipping manual loading; rely on MLX-GUI to load the model when the first transcription request is made.
+                # Skipping manual loading; rely on MLX-RAG to load the model when the first transcription request is made.
             else:
                 print("✅ Model is ready!")
 
@@ -132,18 +132,18 @@ def check_model_status():
 
 def main():
     """Main test function."""
-    print("🎯 MLX-GUI Audio Transcription Test")
+    print("🎯 MLX-RAG Audio Transcription Test")
     print("=" * 50)
 
     # Check server connectivity
     try:
         response = requests.get(f"{BASE_URL}/health")
         if response.status_code != 200:
-            print("❌ MLX-GUI server is not responding")
+            print("❌ MLX-RAG server is not responding")
             sys.exit(1)
-        print("✅ MLX-GUI server is running")
+        print("✅ MLX-RAG server is running")
     except:
-        print("❌ Cannot connect to MLX-GUI server")
+        print("❌ Cannot connect to MLX-RAG server")
         print("   Make sure it's running on http://localhost:8000")
         sys.exit(1)
 

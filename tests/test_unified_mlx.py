@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🧪 MLX-GUI Unified Test Suite
+🧪 MLX-RAG Unified Test Suite
 Tests all MLX model types: Text, Audio, Vision, and Embeddings
 
 Includes support for:
@@ -119,7 +119,7 @@ class MLXTestSuite:
             response = await self.client.get(f"{BASE_URL}/admin")
             if response.status_code == 200:
                 content = response.text
-                if "MLX-GUI Admin" in content:
+                if "MLX-RAG Admin" in content:
                     self.add_result(ModelTestResult("Admin Interface", True, "Admin page accessible"))
                     return True
                 else:
@@ -660,14 +660,14 @@ class MLXTestSuite:
 
     async def run_all_tests(self):
         """Run the complete test suite."""
-        print("🧪 MLX-GUI Unified Test Suite")
+        print("🧪 MLX-RAG Unified Test Suite")
         print("=" * 50)
 
         start_time = time.time()
 
         # Test server health
         if not await self.test_server_health():
-            print("\n❌ Server is not responding. Please start MLX-GUI server first.")
+            print("\n❌ Server is not responding. Please start MLX-RAG server first.")
             return
 
         # Test admin interface
@@ -869,7 +869,7 @@ class MLXTestSuite:
         print(f"\n🎯 Success Rate: {(passed_tests/total_tests)*100:.1f}%")
 
         if failed_tests == 0:
-            print("🎉 All tests passed! MLX-GUI is working correctly.")
+            print("🎉 All tests passed! MLX-RAG is working correctly.")
         else:
             print("⚠️  Some tests failed. Please check the errors above.")
 
@@ -1051,8 +1051,8 @@ if __name__ == "__main__":
         print("Please install with: pip install httpx pillow numpy")
         exit(1)
 
-    print("🚀 Starting MLX-GUI Unified Test Suite...")
-    print("📋 Make sure MLX-GUI server is running on http://localhost:8000")
+    print("🚀 Starting MLX-RAG Unified Test Suite...")
+    print("📋 Make sure MLX-RAG server is running on http://localhost:8000")
     print()
 
     asyncio.run(main())

@@ -1,5 +1,5 @@
 """
-MLX-LM integration layer for MLX-GUI.
+MLX-LM integration layer for MLX-RAG.
 Handles actual model loading, tokenization, and inference using MLX-LM.
 """
 
@@ -65,7 +65,7 @@ except Exception as e:  # broader than ImportError; transformers/metadata issues
     except Exception:
         pass
 
-from mlx_gui.huggingface_integration import get_huggingface_client
+from mlx_rag.huggingface_integration import get_huggingface_client
 
 logger = logging.getLogger(__name__)
 
