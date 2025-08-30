@@ -10,6 +10,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, Header, UploadFile,
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional, Union, Annotated
@@ -19,7 +20,7 @@ import os
 import uuid
 
 from mlx_rag.database import get_db_session, get_database_manager
-from mlx_rag.models import Model, AppSettings, RAGCollection
+from mlx_rag.models import Model, AppSettings, RAGCollection, ChatSession, ChatMessage
 from mlx_rag.system_monitor import get_system_monitor
 from mlx_rag.huggingface_integration import get_huggingface_client
 from mlx_rag.model_manager import get_model_manager
@@ -64,7 +65,7 @@ class ChatMessageContent(BaseModel):
     text: Optional[str] = None
     image_url: Optional[Union[Dict[str, str], str]] = None  # Can be dict or direct string
 
-class ChatMessage(BaseModel):
+class ChatCompletionMessage(BaseModel):
     role: Optional[str] = None  # "system", "user", "assistant"
     content: Optional[Union[str, List[ChatMessageContent]]] = None
     # Alternative image fields that some clients might use
@@ -74,7 +75,7 @@ class ChatMessage(BaseModel):
 
 class ChatCompletionRequest(BaseModel):
     model: str
-    messages: List[ChatMessage]
+    messages: List[ChatCompletionMessage]
     max_tokens: Optional[int] = 8192
     temperature: Optional[float] = 0.7
     top_p: Optional[float] = 1.0
@@ -86,7 +87,7 @@ class ChatCompletionRequest(BaseModel):
 
 class ChatCompletionChoice(BaseModel):
     index: int
-    message: ChatMessage
+    message: ChatCompletionMessage
     finish_reason: str
 
 
@@ -205,7 +206,7 @@ def _get_chat_template_from_hf(model_id: str) -> str:
     return None
 
 
-def _format_chat_prompt(messages: List[ChatMessage]) -> tuple[List[Dict[str, Any]], List[str]]:
+def _format_chat_prompt(messages: List[ChatCompletionMessage]) -> tuple[List[Dict[str, Any]], List[str]]:
     """Convert API ChatMessage objects to a list of dictionaries and extract image URLs."""
     chat_messages = []
     all_images = []
@@ -536,6 +537,12 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    
+    # Mount static files for admin interface
+    from pathlib import Path
+    static_path = Path(__file__).parent / "templates" / "static"
+    if static_path.exists():
+        app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
     # Exception handlers
     @app.exception_handler(Exception)
@@ -702,6 +709,259 @@ def create_app() -> FastAPI:
         rag_manager = get_rag_manager()
         response = rag_manager.query(query, active_collection.name)
         return {"query": query, "response": response}
+
+    # Chat session management endpoints
+    @app.get("/v1/chat/sessions")
+    async def list_chat_sessions(db: Session = Depends(get_db_session)):
+        """List all chat sessions ordered by last message time."""
+        try:
+            sessions = db.query(ChatSession).order_by(ChatSession.last_message_at.desc().nullslast(), ChatSession.updated_at.desc()).all()
+            return {
+                "sessions": [
+                    {
+                        "session_id": session.session_id,
+                        "title": session.get_display_title(),
+                        "created_at": session.created_at.isoformat() if session.created_at else None,
+                        "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+                        "last_message_at": session.last_message_at.isoformat() if session.last_message_at else None,
+                        "message_count": session.message_count,
+                        "model_name": session.model_name,
+                        "rag_collection_name": session.rag_collection_name
+                    }
+                    for session in sessions
+                ]
+            }
+        except Exception as e:
+            logger.error(f"Error listing chat sessions: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error listing chat sessions"
+            )
+
+    @app.post("/v1/chat/sessions")
+    async def create_chat_session(
+        request: dict,
+        db: Session = Depends(get_db_session)
+    ):
+        """Create a new chat session."""
+        try:
+            import uuid
+            
+            session_id = str(uuid.uuid4())
+            title = request.get("title", "New Chat")
+            model_name = request.get("model_name")
+            rag_collection_name = request.get("rag_collection_name")
+            
+            new_session = ChatSession(
+                session_id=session_id,
+                title=title,
+                model_name=model_name,
+                rag_collection_name=rag_collection_name
+            )
+            
+            db.add(new_session)
+            db.commit()
+            
+            return {
+                "session_id": session_id,
+                "title": title,
+                "created_at": new_session.created_at.isoformat(),
+                "model_name": model_name,
+                "rag_collection_name": rag_collection_name
+            }
+        except Exception as e:
+            logger.error(f"Error creating chat session: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error creating chat session"
+            )
+
+    @app.get("/v1/chat/sessions/{session_id}")
+    async def get_chat_session(
+        session_id: str,
+        db: Session = Depends(get_db_session)
+    ):
+        """Get a specific chat session with its messages."""
+        try:
+            session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            if not session:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Chat session '{session_id}' not found"
+                )
+            
+            messages = db.query(ChatMessage).filter(
+                ChatMessage.session_id == session_id
+            ).order_by(ChatMessage.created_at.asc()).all()
+            
+            return {
+                "session_id": session.session_id,
+                "title": session.title,
+                "created_at": session.created_at.isoformat() if session.created_at else None,
+                "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+                "last_message_at": session.last_message_at.isoformat() if session.last_message_at else None,
+                "message_count": session.message_count,
+                "model_name": session.model_name,
+                "rag_collection_name": session.rag_collection_name,
+                "messages": [
+                    {
+                        "id": msg.id,
+                        "role": msg.role,
+                        "content": msg.content,
+                        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                        "model_name": msg.model_name,
+                        "rag_collection_name": msg.rag_collection_name,
+                        "metadata": msg.get_metadata()
+                    }
+                    for msg in messages
+                ]
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting chat session {session_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error getting chat session"
+            )
+
+    @app.put("/v1/chat/sessions/{session_id}/title")
+    async def update_chat_session_title(
+        session_id: str,
+        request: dict,
+        db: Session = Depends(get_db_session)
+    ):
+        """Update the title of a chat session."""
+        try:
+            session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            if not session:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Chat session '{session_id}' not found"
+                )
+            
+            new_title = request.get("title", "").strip()
+            if not new_title:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Title cannot be empty"
+                )
+            
+            session.title = new_title
+            db.commit()
+            
+            return {
+                "session_id": session_id,
+                "title": new_title,
+                "updated_at": session.updated_at.isoformat()
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating chat session title: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error updating chat session title"
+            )
+
+    @app.delete("/v1/chat/sessions/{session_id}")
+    async def delete_chat_session(
+        session_id: str,
+        db: Session = Depends(get_db_session)
+    ):
+        """Delete a chat session and all its messages."""
+        try:
+            session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            if not session:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Chat session '{session_id}' not found"
+                )
+            
+            # Delete all messages (cascade should handle this, but being explicit)
+            db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete()
+            
+            # Delete the session
+            db.delete(session)
+            db.commit()
+            
+            return {
+                "message": f"Chat session '{session_id}' deleted successfully"
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting chat session {session_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error deleting chat session"
+            )
+
+    @app.post("/v1/chat/sessions/{session_id}/messages")
+    async def add_chat_message(
+        session_id: str,
+        request: dict,
+        db: Session = Depends(get_db_session)
+    ):
+        """Add a message to a chat session."""
+        try:
+            session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+            if not session:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Chat session '{session_id}' not found"
+                )
+            
+            role = request.get("role")
+            content = request.get("content")
+            model_name = request.get("model_name")
+            rag_collection_name = request.get("rag_collection_name")
+            metadata = request.get("metadata", {})
+            
+            if not role or not content:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Role and content are required"
+                )
+            
+            new_message = ChatMessage(
+                session_id=session_id,
+                role=role,
+                content=content,
+                model_name=model_name,
+                rag_collection_name=rag_collection_name
+            )
+            
+            if metadata:
+                new_message.set_metadata(metadata)
+            
+            db.add(new_message)
+            
+            # Update session stats
+            session.message_count += 1
+            session.update_last_message()
+            if model_name:
+                session.model_name = model_name
+            if rag_collection_name:
+                session.rag_collection_name = rag_collection_name
+            
+            db.commit()
+            
+            return {
+                "message_id": new_message.id,
+                "session_id": session_id,
+                "role": role,
+                "content": content,
+                "created_at": new_message.created_at.isoformat()
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error adding message to session {session_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error adding message to session"
+            )
 
     @app.post("/v1/chat")
     async def chat(request: dict, db: Session = Depends(get_db_session)):
@@ -1569,7 +1829,7 @@ def create_app() -> FastAPI:
             # Only add system message if no system message exists AND no images (vision models don't handle system messages well)
             if not has_system_message and not images:
                 # Add a helpful default system message for non-vision models
-                default_system = ChatMessage(
+                default_system = ChatCompletionMessage(
                     role="system",
                     content="You are a helpful AI assistant. Provide clear, accurate, and concise responses."
                 )
@@ -1783,7 +2043,7 @@ def create_app() -> FastAPI:
                     choices=[
                         ChatCompletionChoice(
                             index=0,
-                            message=ChatMessage(
+                            message=ChatCompletionMessage(
                                 role="assistant",
                                 content=result.text
                             ),
@@ -2345,26 +2605,29 @@ def create_app() -> FastAPI:
         import sys
 
         # Read the admin template - handle both development and bundled app
+        # Use modular template for better maintainability
+        template_name = "admin_modular.html"
+        
         if hasattr(sys, 'frozen') and sys.frozen:
             # Running as bundled app - use PyInstaller's _MEIPASS
             if hasattr(sys, '_MEIPASS'):
-                template_path = Path(sys._MEIPASS) / "mlx_gui" / "templates" / "admin.html"
+                template_path = Path(sys._MEIPASS) / "mlx_rag" / "templates" / template_name
                 logger.info(f"PyInstaller bundled app: Looking for template at {template_path}")
                 logger.info(f"_MEIPASS directory: {sys._MEIPASS}")
                 # List contents of _MEIPASS for debugging
                 meipass_path = Path(sys._MEIPASS)
                 if meipass_path.exists():
                     logger.info(f"_MEIPASS contents: {list(meipass_path.iterdir())}")
-                    mlx_rag_path = meipass_path / "mlx_gui"
+                    mlx_rag_path = meipass_path / "mlx_rag"
                     if mlx_rag_path.exists():
-                        logger.info(f"mlx_gui directory contents: {list(mlx_gui_path.iterdir())}")
+                        logger.info(f"mlx_rag directory contents: {list(mlx_rag_path.iterdir())}")
             else:
                 # Fallback for frozen apps without _MEIPASS
-                template_path = Path(sys.executable).parent / "mlx_gui" / "templates" / "admin.html"
+                template_path = Path(sys.executable).parent / "mlx_rag" / "templates" / template_name
                 logger.info(f"Frozen app fallback: Looking for template at {template_path}")
         else:
             # Running in development
-            template_path = Path(__file__).parent / "templates" / "admin.html"
+            template_path = Path(__file__).parent / "templates" / template_name
             logger.info(f"Development mode: Looking for template at {template_path}")
 
         if not template_path.exists():
@@ -2373,9 +2636,9 @@ def create_app() -> FastAPI:
             if hasattr(sys, 'frozen') and sys.frozen:
                 # Try some alternate paths in bundled app
                 alternate_paths = [
-                    Path(sys.executable).parent / "templates" / "admin.html",
-                    Path(sys.executable).parent / "admin.html",
-                    Path(sys.executable).parent / "Contents" / "Resources" / "templates" / "admin.html",
+                    Path(sys.executable).parent / "templates" / template_name,
+                    Path(sys.executable).parent / template_name,
+                    Path(sys.executable).parent / "Contents" / "Resources" / "templates" / template_name,
                 ]
                 for alt_path in alternate_paths:
                     logger.info(f"Trying alternate path: {alt_path}")

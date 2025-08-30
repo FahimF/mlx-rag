@@ -316,3 +316,73 @@ class RAGCollection(Base):
 
     def __repr__(self):
         return f"<RAGCollection(name='{self.name}', status='{self.status}', active={self.is_active})>"
+
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String, nullable=False, unique=True)
+    title = Column(String, nullable=False, default="New Chat")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_message_at = Column(DateTime)
+    model_name = Column(String)  # Last used model
+    rag_collection_name = Column(String)  # Last used RAG collection
+    message_count = Column(Integer, default=0)
+
+    # Relationships
+    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
+
+    def update_last_message(self):
+        """Update last message timestamp and increment message count."""
+        self.last_message_at = datetime.utcnow()
+        self.updated_at = datetime.utcnow()
+
+    def get_display_title(self) -> str:
+        """Get display title, falling back to first message if title is default."""
+        if self.title and self.title != "New Chat":
+            return self.title
+        if self.messages:
+            first_message = self.messages[0].content[:50]
+            return f"{first_message}..." if len(first_message) == 50 else first_message
+        return "New Chat"
+
+    def __repr__(self):
+        return f"<ChatSession(id={self.id}, title='{self.title}', messages={self.message_count})>"
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String, ForeignKey("chat_sessions.session_id"), nullable=False)
+    role = Column(String, nullable=False)  # 'user', 'assistant', 'system'
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    model_name = Column(String)  # Model used for this response (for assistant messages)
+    rag_collection_name = Column(String)  # RAG collection used (for assistant messages)
+    message_metadata = Column(Text)  # JSON string for additional metadata (tokens, timing, etc.)
+
+    # Relationships
+    session = relationship("ChatSession", back_populates="messages")
+
+    def get_metadata(self) -> Dict[str, Any]:
+        """Parse metadata JSON string into dictionary."""
+        if self.message_metadata:
+            return json.loads(self.message_metadata)
+        return {}
+
+    def set_metadata(self, metadata: Dict[str, Any]):
+        """Set metadata from dictionary."""
+        self.message_metadata = json.dumps(metadata)
+
+    def __repr__(self):
+        return f"<ChatMessage(id={self.id}, session_id='{self.session_id}', role='{self.role}')>"
+
+
+# Create additional indexes for chat tables
+Index("idx_chat_sessions_updated_at", ChatSession.updated_at)
+Index("idx_chat_sessions_last_message_at", ChatSession.last_message_at)
+Index("idx_chat_messages_session_id", ChatMessage.session_id)
+Index("idx_chat_messages_created_at", ChatMessage.created_at)

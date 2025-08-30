@@ -1,0 +1,207 @@
+/* MLX-RAG Admin Dashboard Styles */
+
+.glass {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.gradient-bg {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.card-hover {
+    transition: all 0.3s ease;
+}
+
+.card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 8px;
+}
+
+.status-loaded { 
+    background-color: #10b981; 
+}
+
+.status-unloaded { 
+    background-color: #6b7280; 
+}
+
+.status-loading {
+    background-color: #f59e0b;
+    animation: pulse 2s infinite;
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+.status-failed { 
+    background-color: #ef4444; 
+}
+
+.status-downloading {
+    background-color: #3b82f6;
+    animation: bounce 1s infinite;
+}
+
+.status-processing {
+    background-color: #f59e0b;
+    animation: pulse 2s infinite;
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+.status-ready { 
+    background-color: #10b981; 
+}
+
+.status-error { 
+    background-color: #ef4444; 
+}
+
+@keyframes bounce {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+}
+
+.progress-glow {
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+}
+
+/* Tab content visibility */
+.tab-content {
+    display: block;
+}
+
+.tab-content.hidden {
+    display: none !important;
+}
+
+/* Chat session hover effects */
+.chat-session-item {
+    group: hover;
+}
+
+.chat-session-item:hover .opacity-0 {
+    opacity: 1;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .chat-session-item {
+        padding: 12px;
+    }
+    
+    .card-hover {
+        transform: none;
+    }
+    
+    .card-hover:hover {
+        transform: none;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+}
+
+/* Custom scrollbars */
+.overflow-y-auto::-webkit-scrollbar {
+    width: 8px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+    background: rgba(55, 65, 81, 0.3);
+    border-radius: 4px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+    background: rgba(107, 114, 128, 0.5);
+    border-radius: 4px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+    background: rgba(107, 114, 128, 0.7);
+}
+
+/* Loading animations */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.fa-spin {
+    animation: spin 2s infinite linear;
+}
+
+/* Toast notifications */
+#toast {
+    transition: all 0.3s ease-in-out;
+    transform: translateX(100%);
+}
+
+#toast:not(.hidden) {
+    transform: translateX(0);
+}
+
+/* Modal animations */
+.modal-backdrop {
+    transition: opacity 0.3s ease-in-out;
+}
+
+.modal-content {
+    transition: all 0.3s ease-in-out;
+    transform: scale(0.9);
+    opacity: 0;
+}
+
+.modal-content:not(.hidden) {
+    transform: scale(1);
+    opacity: 1;
+}
+
+/* Button states */
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+button:disabled:hover {
+    transform: none;
+}
+
+/* Input focus states */
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 1px #60a5fa;
+}
+
+/* Progress bars */
+.progress-bar {
+    transition: width 0.3s ease-in-out;
+}
+
+/* Message bubbles */
+.message-bubble {
+    max-width: 80%;
+    word-wrap: break-word;
+}
+
+.message-bubble pre {
+    white-space: pre-wrap;
+    overflow-x: auto;
+}
+
+.message-bubble code {
+    font-family: 'Courier New', monospace;
+}

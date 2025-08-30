@@ -1,0 +1,658 @@
+/**
+ * MLX-RAG Admin Dashboard - Chat Functions
+ * Chat session management and messaging functionality
+ */
+
+// Enhanced Chat functions with session management
+let chatSessions = [];
+let currentChatSession = null;
+let currentChatMessages = [];
+
+// Load chat sessions from server
+async function loadChatSessions() {
+    try {
+        const response = await apiCall('/v1/chat/sessions');
+        chatSessions = response.sessions || [];
+        renderChatSessions();
+        
+        // Initialize with first session if available and no current session
+        if (chatSessions.length > 0 && !currentChatSession) {
+            await loadChatSession(chatSessions[0].session_id);
+        }
+    } catch (error) {
+        console.error('Failed to load chat sessions:', error);
+        showToast('Failed to load chat history', 'error');
+    }
+}
+
+// Create a new chat session
+async function newChatSession() {
+    try {
+        const model = document.getElementById('chat-model-select').value;
+        const ragCollection = document.getElementById('chat-rag-select').value;
+        
+        const response = await apiCall('/v1/chat/sessions', {
+            method: 'POST',
+            body: JSON.stringify({
+                title: 'New Chat',
+                model_name: model,
+                rag_collection_name: ragCollection
+            })
+        });
+        
+        // Reload sessions and switch to the new one
+        await loadChatSessions();
+        await loadChatSession(response.session_id);
+        
+        showToast('New chat session created');
+    } catch (error) {
+        console.error('Failed to create new chat session:', error);
+        showToast('Failed to create new chat session', 'error');
+    }
+}
+
+// Load a specific chat session
+async function loadChatSession(sessionId) {
+    try {
+        const response = await apiCall(`/v1/chat/sessions/${sessionId}`);
+        currentChatSession = response;
+        currentChatMessages = response.messages || [];
+        
+        // Update UI
+        document.getElementById('current-chat-title').textContent = response.title;
+        document.getElementById('edit-title-btn').classList.remove('hidden');
+        document.getElementById('delete-chat-btn').classList.remove('hidden');
+        
+        // Set model and RAG collection if available
+        if (response.model_name) {
+            document.getElementById('chat-model-select').value = response.model_name;
+        }
+        if (response.rag_collection_name) {
+            document.getElementById('chat-rag-select').value = response.rag_collection_name;
+        }
+        
+        // Enable chat input
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-chat-btn');
+        chatInput.disabled = false;
+        sendBtn.disabled = false;
+        chatInput.placeholder = 'Type your message...';
+        
+        // Hide placeholder and render messages
+        document.getElementById('no-chat-placeholder').style.display = 'none';
+        renderChatMessages();
+        
+        // Update session list selection
+        updateSessionSelection(sessionId);
+        
+    } catch (error) {
+        console.error('Failed to load chat session:', error);
+        showToast('Failed to load chat session', 'error');
+    }
+}
+
+// Render chat sessions in sidebar
+function renderChatSessions() {
+    const container = document.getElementById('chat-sessions-list');
+    
+    if (chatSessions.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-gray-500 py-8">
+                <i class="fas fa-comment text-3xl mb-2"></i>
+                <p class="text-sm">No chat history</p>
+                <button onclick="newChatSession()" class="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
+                    Start First Chat
+                </button>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = chatSessions.map(session => {
+        const isActive = currentChatSession && currentChatSession.session_id === session.session_id;
+        const timeago = formatTimeAgo(session.last_message_at || session.updated_at);
+        
+        return `
+            <div class="chat-session-item p-3 rounded-lg cursor-pointer transition-colors mb-2 ${
+                isActive ? 'bg-blue-600 border-blue-400' : 'bg-gray-700 hover:bg-gray-600'
+            }" 
+                 onclick="loadChatSession('${session.session_id}')">
+                <div class="flex items-start justify-between">
+                    <div class="flex-1 min-w-0">
+                        <h4 class="text-white font-medium text-sm truncate">${escapeHtml(session.title)}</h4>
+                        <div class="flex items-center space-x-2 mt-1">
+                            <span class="text-xs text-gray-400">${timeago}</span>
+                            ${session.message_count > 0 ? `<span class="text-xs text-gray-400">• ${session.message_count} msgs</span>` : ''}
+                        </div>
+                        ${session.model_name ? `<div class="text-xs text-blue-300 mt-1">${session.model_name}</div>` : ''}
+                    </div>
+                    <div class="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onclick="event.stopPropagation(); editSessionTitle('${session.session_id}')" 
+                                class="text-gray-400 hover:text-white p-1">
+                            <i class="fas fa-edit text-xs"></i>
+                        </button>
+                        <button onclick="event.stopPropagation(); deleteSession('${session.session_id}')" 
+                                class="text-gray-400 hover:text-red-400 p-1">
+                            <i class="fas fa-trash text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Update session selection in sidebar
+function updateSessionSelection(sessionId) {
+    document.querySelectorAll('.chat-session-item').forEach(item => {
+        item.classList.remove('bg-blue-600', 'border-blue-400');
+        item.classList.add('bg-gray-700', 'hover:bg-gray-600');
+    });
+    
+    const activeItem = document.querySelector(`[onclick*="${sessionId}"]`);
+    if (activeItem) {
+        activeItem.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+        activeItem.classList.add('bg-blue-600', 'border-blue-400');
+    }
+}
+
+// Render messages in current session
+function renderChatMessages() {
+    const container = document.getElementById('chat-messages');
+    
+    if (currentChatMessages.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-gray-500 py-8">
+                <i class="fas fa-comment-dots text-3xl mb-2"></i>
+                <p>Start a conversation...</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = currentChatMessages.map((msg, index) => {
+        let content;
+        if (msg.role === 'user') {
+            content = escapeHtml(msg.content);
+        } else {
+            // For assistant messages, check if streaming
+            if (msg.isStreaming) {
+                content = escapeHtml(msg.content);
+            } else {
+                content = parseMarkdown(msg.content);
+            }
+        }
+        
+        const timestamp = msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : '';
+        
+        return `
+            <div class="mb-4">
+                <div class="flex items-start space-x-3">
+                    <div class="flex-shrink-0">
+                        <div class="w-8 h-8 rounded-full flex items-center justify-center ${
+                            msg.role === 'user' ? 'bg-blue-600' : 'bg-green-600'
+                        }">
+                            <i class="fas ${
+                                msg.role === 'user' ? 'fa-user' : 'fa-robot'
+                            } text-white text-sm"></i>
+                        </div>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center space-x-2 mb-1">
+                            <span class="text-sm font-medium text-white capitalize">${msg.role}</span>
+                            <span class="text-xs text-gray-400">${timestamp}</span>
+                            ${msg.model_name ? `<span class="text-xs text-blue-300">${msg.model_name}</span>` : ''}
+                            ${msg.rag_collection_name ? `<span class="text-xs text-purple-300">RAG: ${msg.rag_collection_name}</span>` : ''}
+                        </div>
+                        <div class="p-3 rounded-lg ${
+                            msg.role === 'user' ? 'bg-gray-700' : 'bg-gray-800'
+                        }">
+                            <div class="text-white ${
+                                msg.role === 'user' || msg.isStreaming ? 'whitespace-pre-wrap' : ''
+                            }">${content}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // Auto-scroll to bottom
+    setTimeout(() => {
+        container.scrollTop = container.scrollHeight;
+    }, 100);
+}
+
+// Send message in current session
+async function sendChatMessage() {
+    const input = document.getElementById('chat-input');
+    const message = input.value.trim();
+    if (!message) return;
+    
+    const model = document.getElementById('chat-model-select').value;
+    const ragCollection = document.getElementById('chat-rag-select').value;
+    
+    if (!model) {
+        showToast('Please select a model', 'error');
+        return;
+    }
+    
+    if (!currentChatSession) {
+        // Create new session if none exists
+        await newChatSession();
+        if (!currentChatSession) return;
+    }
+    
+    // Add user message locally
+    const userMessage = {
+        role: 'user',
+        content: message,
+        created_at: new Date().toISOString(),
+        isStreaming: false
+    };
+    
+    currentChatMessages.push(userMessage);
+    renderChatMessages();
+    input.value = '';
+    
+    // Save user message to server
+    try {
+        await apiCall(`/v1/chat/sessions/${currentChatSession.session_id}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({
+                role: 'user',
+                content: message
+            })
+        });
+    } catch (error) {
+        console.error('Failed to save user message:', error);
+    }
+    
+    // Add placeholder for assistant response
+    const assistantMessage = {
+        role: 'assistant',
+        content: '',
+        created_at: new Date().toISOString(),
+        model_name: model,
+        rag_collection_name: ragCollection,
+        isStreaming: true
+    };
+    
+    currentChatMessages.push(assistantMessage);
+    renderChatMessages();
+    
+    try {
+        // Use the existing chat endpoint for streaming
+        const response = await fetch('/v1/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: message,
+                model: model,
+                rag_collection: ragCollection,
+                history: currentChatMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        // Stream the response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullResponse = '';
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            fullResponse += chunk;
+            
+            // Update the assistant message
+            assistantMessage.content = fullResponse;
+            renderChatMessages();
+        }
+        
+        // Mark streaming as complete
+        assistantMessage.isStreaming = false;
+        renderChatMessages();
+        
+        // Save assistant message to server
+        try {
+            await apiCall(`/v1/chat/sessions/${currentChatSession.session_id}/messages`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    role: 'assistant',
+                    content: fullResponse,
+                    model_name: model,
+                    rag_collection_name: ragCollection
+                })
+            });
+            
+            // Update session stats
+            currentChatSession.message_count += 2; // user + assistant
+            currentChatSession.last_message_at = new Date().toISOString();
+            
+            // Refresh sessions list to show updated info
+            await loadChatSessions();
+        } catch (error) {
+            console.error('Failed to save assistant message:', error);
+        }
+        
+    } catch (error) {
+        console.error('Error sending message:', error);
+        showToast('Failed to get response from model', 'error');
+        
+        // Update assistant message with error
+        assistantMessage.content = `Error: ${error.message}`;
+        assistantMessage.isStreaming = false;
+        renderChatMessages();
+    }
+}
+
+// Handle Enter key in chat input
+function handleChatInputKeydown(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendChatMessage();
+    }
+}
+
+// Edit chat session title
+async function editChatTitle() {
+    if (!currentChatSession) return;
+    
+    const newTitle = prompt('Enter new title:', currentChatSession.title);
+    if (!newTitle || newTitle.trim() === currentChatSession.title) return;
+    
+    try {
+        await apiCall(`/v1/chat/sessions/${currentChatSession.session_id}/title`, {
+            method: 'PUT',
+            body: JSON.stringify({ title: newTitle.trim() })
+        });
+        
+        currentChatSession.title = newTitle.trim();
+        document.getElementById('current-chat-title').textContent = newTitle.trim();
+        
+        // Refresh sessions list
+        await loadChatSessions();
+        
+        showToast('Chat title updated');
+    } catch (error) {
+        console.error('Failed to update chat title:', error);
+        showToast('Failed to update chat title', 'error');
+    }
+}
+
+// Delete current chat session (called from delete button in main area)
+async function deleteChatSession() {
+    if (!currentChatSession) return;
+    
+    if (!confirm(`Are you sure you want to delete "${currentChatSession.title}"?\n\nThis will permanently delete all messages in this chat.`)) {
+        return;
+    }
+    
+    try {
+        await apiCall(`/v1/chat/sessions/${currentChatSession.session_id}`, {
+            method: 'DELETE'
+        });
+        
+        // Clear current session
+        currentChatSession = null;
+        currentChatMessages = [];
+        
+        // Reset UI
+        document.getElementById('current-chat-title').textContent = 'RAG Chat';
+        document.getElementById('edit-title-btn').classList.add('hidden');
+        document.getElementById('delete-chat-btn').classList.add('hidden');
+        document.getElementById('no-chat-placeholder').style.display = 'block';
+        document.getElementById('chat-messages').innerHTML = `
+            <div class="text-center text-gray-500 py-8" id="no-chat-placeholder">
+                <i class="fas fa-comments text-4xl mb-4"></i>
+                <p>Select a chat or start a new conversation</p>
+            </div>
+        `;
+        
+        // Disable chat input
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-chat-btn');
+        chatInput.disabled = true;
+        sendBtn.disabled = true;
+        chatInput.placeholder = 'Select a model and start chatting...';
+        
+        // Refresh sessions list
+        await loadChatSessions();
+        
+        showToast('Chat session deleted');
+    } catch (error) {
+        console.error('Failed to delete chat session:', error);
+        showToast('Failed to delete chat session', 'error');
+    }
+}
+
+// Delete session from sidebar (called from trash icon in session list)
+async function deleteSession(sessionId) {
+    // Find the session in the list
+    const session = chatSessions.find(s => s.session_id === sessionId);
+    if (!session) {
+        showToast('Session not found', 'error');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete "${session.title}"?\n\nThis will permanently delete all messages in this chat.`)) {
+        return;
+    }
+    
+    try {
+        await apiCall(`/v1/chat/sessions/${sessionId}`, {
+            method: 'DELETE'
+        });
+        
+        // If this was the current session, clear it
+        if (currentChatSession && currentChatSession.session_id === sessionId) {
+            currentChatSession = null;
+            currentChatMessages = [];
+            
+            // Reset UI
+            document.getElementById('current-chat-title').textContent = 'RAG Chat';
+            document.getElementById('edit-title-btn').classList.add('hidden');
+            document.getElementById('delete-chat-btn').classList.add('hidden');
+            document.getElementById('no-chat-placeholder').style.display = 'block';
+            document.getElementById('chat-messages').innerHTML = `
+                <div class="text-center text-gray-500 py-8" id="no-chat-placeholder">
+                    <i class="fas fa-comments text-4xl mb-4"></i>
+                    <p>Select a chat or start a new conversation</p>
+                </div>
+            `;
+            
+            // Disable chat input
+            const chatInput = document.getElementById('chat-input');
+            const sendBtn = document.getElementById('send-chat-btn');
+            chatInput.disabled = true;
+            sendBtn.disabled = true;
+            chatInput.placeholder = 'Select a model and start chatting...';
+        }
+        
+        // Refresh sessions list
+        await loadChatSessions();
+        
+        showToast('Chat session deleted');
+    } catch (error) {
+        console.error('Failed to delete chat session:', error);
+        showToast('Failed to delete chat session', 'error');
+    }
+}
+
+// Edit session title from sidebar (called from edit icon in session list)
+async function editSessionTitle(sessionId) {
+    // Find the session in the list
+    const session = chatSessions.find(s => s.session_id === sessionId);
+    if (!session) {
+        showToast('Session not found', 'error');
+        return;
+    }
+    
+    const newTitle = prompt('Enter new title:', session.title);
+    if (!newTitle || newTitle.trim() === session.title) return;
+    
+    try {
+        await apiCall(`/v1/chat/sessions/${sessionId}/title`, {
+            method: 'PUT',
+            body: JSON.stringify({ title: newTitle.trim() })
+        });
+        
+        // Update local session data
+        session.title = newTitle.trim();
+        
+        // If this is the current session, update the main title too
+        if (currentChatSession && currentChatSession.session_id === sessionId) {
+            currentChatSession.title = newTitle.trim();
+            document.getElementById('current-chat-title').textContent = newTitle.trim();
+        }
+        
+        // Refresh sessions list to show updated title
+        renderChatSessions();
+        
+        showToast('Chat title updated');
+    } catch (error) {
+        console.error('Failed to update chat title:', error);
+        showToast('Failed to update chat title', 'error');
+    }
+}
+
+// Load available models for chat
+async function loadChatModels() {
+    try {
+        const response = await apiCall('/v1/manager/models');
+        const models = response.models || [];
+        const availableModels = models.filter(m => m.type === 'text' || m.type === 'multimodal');
+        
+        const select = document.getElementById('chat-model-select');
+        
+        if (availableModels.length === 0) {
+            select.innerHTML = '<option value="">No models available</option>';
+            return;
+        }
+        
+        select.innerHTML = availableModels.map(model => {
+            const statusIcon = model.status === 'loaded' ? '✓' : model.status === 'loading' ? '⏳' : '○';
+            return `<option value="${model.name}">${statusIcon} ${model.name}</option>`;
+        }).join('');
+        
+        // Try to maintain current selection or select first loaded model
+        const loadedModels = availableModels.filter(m => m.status === 'loaded');
+        if (loadedModels.length > 0 && !select.value) {
+            select.value = loadedModels[0].name;
+        }
+        
+        // Enable/disable input based on model selection
+        updateChatInputState();
+    } catch (error) {
+        console.error('Failed to load chat models:', error);
+        document.getElementById('chat-model-select').innerHTML = '<option value="">Error loading models</option>';
+    }
+}
+
+// Load RAG collections for chat
+async function loadChatRagCollections() {
+    try {
+        const response = await apiCall('/v1/rag/collections');
+        const collections = response.collections || [];
+        const select = document.getElementById('chat-rag-select');
+        
+        select.innerHTML = '<option value="">No RAG</option>' + collections.map(col => 
+            `<option value="${col.name}">${col.name} ${col.is_active ? '(Active)' : ''}</option>`
+        ).join('');
+        
+        // Select active collection by default
+        const activeCollection = collections.find(c => c.is_active);
+        if (activeCollection) {
+            select.value = activeCollection.name;
+        }
+    } catch (error) {
+        console.error('Failed to load RAG collections for chat:', error);
+    }
+}
+
+// Update chat input state based on selections
+function updateChatInputState() {
+    const model = document.getElementById('chat-model-select').value;
+    const chatInput = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('send-chat-btn');
+    
+    if (model && currentChatSession) {
+        chatInput.disabled = false;
+        sendBtn.disabled = false;
+        chatInput.placeholder = 'Type your message...';
+    } else {
+        chatInput.disabled = true;
+        sendBtn.disabled = true;
+        chatInput.placeholder = currentChatSession ? 'Select a model to start chatting...' : 'Create or select a chat session first...';
+    }
+}
+
+// Filter chat sessions based on search
+function filterChatSessions(searchTerm) {
+    const sessionItems = document.querySelectorAll('.chat-session-item');
+    
+    sessionItems.forEach(item => {
+        const titleElement = item.querySelector('h4');
+        const title = titleElement ? titleElement.textContent.toLowerCase() : '';
+        
+        if (title.includes(searchTerm)) {
+            item.style.display = 'block';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
+
+// Initialize chat tab
+async function initializeChatTab() {
+    await loadChatModels();
+    await loadChatRagCollections();
+    await loadChatSessions();
+    
+    // Add event listeners
+    document.getElementById('chat-model-select').addEventListener('change', updateChatInputState);
+    document.getElementById('chat-rag-select').addEventListener('change', () => {
+        // Update current session RAG collection preference
+        if (currentChatSession) {
+            currentChatSession.rag_collection_name = document.getElementById('chat-rag-select').value;
+        }
+    });
+    
+    // Chat search functionality
+    document.getElementById('chat-search').addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase();
+        filterChatSessions(searchTerm);
+    });
+}
+
+// Legacy function for backward compatibility
+function newChat() {
+    newChatSession();
+}
+
+// Legacy function for backward compatibility  
+function sendMessage() {
+    sendChatMessage();
+}
+
+// Export functions for global use
+window.loadChatSessions = loadChatSessions;
+window.newChatSession = newChatSession;
+window.loadChatSession = loadChatSession;
+window.sendChatMessage = sendChatMessage;
+window.handleChatInputKeydown = handleChatInputKeydown;
+window.editChatTitle = editChatTitle;
+window.deleteChatSession = deleteChatSession;
+window.deleteSession = deleteSession;
+window.editSessionTitle = editSessionTitle;
+window.loadChatModels = loadChatModels;
+window.loadChatRagCollections = loadChatRagCollections;
+window.initializeChatTab = initializeChatTab;
+window.newChat = newChat;
+window.sendMessage = sendMessage;

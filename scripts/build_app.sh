@@ -801,7 +801,7 @@ PYINSTALLER_CMD=(
     "--copy-metadata" "ffmpeg-binaries"
     "--copy-metadata" "awkward_cpp"
     # Include HTML templates and media assets
-    "--add-data" "src/mlx_gui/templates:mlx_gui/templates"
+    "--add-data" "src/mlx_rag/templates:mlx_rag/templates"
     "--add-data" "media:media"
     "--hidden-import" "scipy.sparse.csgraph._validation"
     "--hidden-import" "mlx._reprlib_fix"
@@ -838,7 +838,7 @@ PYINSTALLER_CMD=(
 )
 
 # Read version from Python module using UV
-VERSION=$(uv run python -c "from src.mlx_gui import __version__; print(__version__)")
+VERSION=$(uv run python -c "from src.mlx_rag import __version__; print(__version__)")
 echo "📝 Building version: $VERSION"
 
 # Create a custom .spec file for maximum control over SSL library exclusion
@@ -896,7 +896,7 @@ def selective_ssl_filter(datas_or_binaries):
     return filtered
 
 a = Analysis(
-    ['src/mlx_gui/app_main.py'],
+    ['src/mlx_rag/app_main.py'],
     pathex=[],
     binaries=[
         # Bundle Homebrew ffmpeg/ffprobe only; avoid PyAV's libav* to prevent symbol clashes
@@ -904,7 +904,7 @@ a = Analysis(
         ('ffmpeg_binaries/ffprobe', 'ffprobe'),
     ],
     datas=[
-        ('src/mlx_gui/templates', 'mlx_gui/templates'),
+        ('src/mlx_rag/templates', 'mlx_rag/templates'),
         ('media', 'media'),
     ],
     hiddenimports=[

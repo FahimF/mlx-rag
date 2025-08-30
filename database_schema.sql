@@ -118,6 +118,46 @@ CREATE TRIGGER update_settings_timestamp
         UPDATE app_settings SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
     END;
 
+-- Chat sessions table - stores chat conversation sessions with titles
+CREATE TABLE chat_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL DEFAULT 'New Chat',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_message_at TIMESTAMP,
+    model_name TEXT, -- Last used model for this session
+    rag_collection_name TEXT, -- Last used RAG collection for this session
+    message_count INTEGER DEFAULT 0
+);
+
+-- Chat messages table - stores individual messages within chat sessions
+CREATE TABLE chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL, -- 'user', 'assistant', 'system'
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    model_name TEXT, -- Model used for assistant responses
+    rag_collection_name TEXT, -- RAG collection used for assistant responses
+    metadata TEXT, -- JSON string for additional metadata (tokens, timing, etc.)
+    FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id) ON DELETE CASCADE
+);
+
+-- Create indexes for chat tables
+CREATE INDEX idx_chat_sessions_updated_at ON chat_sessions(updated_at);
+CREATE INDEX idx_chat_sessions_last_message_at ON chat_sessions(last_message_at);
+CREATE INDEX idx_chat_messages_session_id ON chat_messages(session_id);
+CREATE INDEX idx_chat_messages_created_at ON chat_messages(created_at);
+
+-- Create triggers for automatic timestamp updates
+CREATE TRIGGER update_chat_sessions_timestamp 
+    AFTER UPDATE ON chat_sessions
+    FOR EACH ROW
+    BEGIN
+        UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+    END;
+
 -- Insert default application settings
 INSERT INTO app_settings (key, value, value_type, description) VALUES
     ('server_port', '8000', 'integer', 'Default server port'),

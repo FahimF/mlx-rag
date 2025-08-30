@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLX-RAG Admin Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="/static/css/admin.css" rel="stylesheet">
+</head>
+<body class="gradient-bg min-h-screen">
+    <!-- Header -->
+    <nav class="glass shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <i class="fas fa-brain text-white text-2xl mr-3"></i>
+                    <div>
+                        <h1 class="text-white text-xl font-bold">MLX-RAG Admin</h1>
+                        <div class="text-gray-300 text-xs">Version <span id="app-version">{{ version }}</span></div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div class="text-white text-sm">
+                        <span id="system-status" class="status-indicator status-loaded"></span>
+                        <span>System Online</span>
+                    </div>
+                    <div class="text-white text-sm">
+                        <i class="fas fa-memory mr-1"></i>
+                        <span id="memory-usage">0GB / 0GB</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Dashboard Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <!-- System Status Card -->
+            <div class="glass rounded-lg p-6 card-hover">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-server text-green-400 text-2xl"></i>
+                    </div>
+                    <div class="ml-5 w-0 flex-1">
+                        <dl>
+                            <dt class="text-sm font-medium text-gray-300 truncate">System Status</dt>
+                            <dd class="text-lg font-medium text-white" id="system-health">Healthy</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Loaded Models Card -->
+            <div class="glass rounded-lg p-6 card-hover">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-cubes text-blue-400 text-2xl"></i>
+                    </div>
+                    <div class="ml-5 w-0 flex-1">
+                        <dl>
+                            <dt class="text-sm font-medium text-gray-300 truncate">Loaded Models</dt>
+                            <dd class="text-lg font-medium text-white" id="loaded-count">0</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Memory Usage Card -->
+            <div class="glass rounded-lg p-6 card-hover">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-memory text-purple-400 text-2xl"></i>
+                    </div>
+                    <div class="ml-5 w-0 flex-1">
+                        <dl>
+                            <dt class="text-sm font-medium text-gray-300 truncate">Memory Usage</dt>
+                            <dd class="text-lg font-medium text-white" id="memory-percent">0%</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Queue Size Card -->
+            <div class="glass rounded-lg p-6 card-hover">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-list text-yellow-400 text-2xl"></i>
+                    </div>
+                    <div class="ml-5 w-0 flex-1">
+                        <dl>
+                            <dt class="text-sm font-medium text-gray-300 truncate">Queue Size</dt>
+                            <dd class="text-lg font-medium text-white" id="queue-size">0</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Tabs -->
+        <div class="glass rounded-lg">
+            <!-- Tab Navigation -->
+            <div class="border-b border-gray-600">
+                <nav class="-mb-px flex space-x-8 px-6">
+                    <button class="tab-button active border-b-2 border-blue-400 py-4 px-1 text-blue-400 font-medium text-sm" data-tab="models">
+                        <i class="fas fa-cubes mr-2"></i>Models
+                    </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="discover">
+                        <i class="fas fa-search mr-2"></i>Discover
+                    </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="monitor">
+                        <i class="fas fa-chart-line mr-2"></i>Monitor
+                    </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="api-test">
+                        <i class="fas fa-code mr-2"></i>API Test
+                    </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="transcribe">
+                        <i class="fas fa-microphone mr-2"></i>Transcribe
+                    </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="rag">
+                        <i class="fas fa-robot mr-2"></i>RAG
+                    </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="chat">
+                        <i class="fas fa-comments mr-2"></i>Chat
+                    </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-gray-300 font-medium text-sm hover:text-white" data-tab="settings">
+                        <i class="fas fa-cog mr-2"></i>Settings
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="p-6">
+                <!-- Models Tab -->
+                <div id="models-tab" class="tab-content">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-xl font-bold text-white">Installed Models</h2>
+                        <button onclick="refreshModels()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
+                            <i class="fas fa-sync-alt mr-2"></i>Refresh
+                        </button>
+                    </div>
+                    <div id="models-list" class="space-y-4">
+                        <!-- Models will be loaded here -->
+                    </div>
+                </div>
+
+                <!-- Discover Tab -->
+                <div id="discover-tab" class="tab-content hidden">
+                    <div class="mb-6">
+                        <h2 class="text-xl font-bold text-white mb-4">Discover MLX Models</h2>
+                        <div class="flex space-x-4">
+                            <div class="flex-1">
+                                <input type="text" id="search-input" placeholder="Search models..."
+                                       class="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-400 focus:outline-none">
+                            </div>
+                            <button onclick="searchModels()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg">
+                                <i class="fas fa-search mr-2"></i>Search
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Category buttons -->
+                    <div class="mb-6">
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="loadTrendingModels()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm" style="background-color: #dc2626 !important;">
+                                <i class="fas fa-fire mr-1"></i>Trending
+                            </button>
+                            <button onclick="loadPopularChat()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">
+                                <i class="fas fa-comments mr-1"></i>Text
+                            </button>
+                            <button onclick="loadPopularSTT()" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg text-sm" style="background-color: #ea580c !important;">
+                                <i class="fas fa-microphone mr-1"></i>STT
+                            </button>
+                            <button onclick="loadVisionModels()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm" style="background-color: #9333ea !important;">
+                                <i class="fas fa-eye mr-1"></i>Multimodal
+                            </button>
+                            <button onclick="loadCompatibleModels()" class="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-lg text-sm" style="background-color: #0d9488 !important;">
+                                <i class="fas fa-check mr-1"></i>Compatible
+                            </button>
+                            <button onclick="loadSmallModels()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm">
+                                <i class="fas fa-feather mr-1"></i>Small (&lt;10GB)
+                            </button>
+                            <button onclick="loadEmbeddingModels()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm" style="background-color: #059669 !important;">
+                                <i class="fas fa-vector-square mr-1"></i>Embeddings
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="discover-results" class="space-y-4">
+                        <!-- Search results will be loaded here -->
+                    </div>
+                </div>
+
+                <!-- Monitor Tab -->
+                <div id="monitor-tab" class="tab-content hidden">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- System Info -->
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">System Information</h3>
+                            <div id="system-info" class="space-y-3 text-sm text-gray-300">
+                                <!-- System info will be loaded here -->
+                            </div>
+                        </div>
+
+                        <!-- Model Statistics -->
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">Model Statistics</h3>
+                            <div id="model-stats" class="space-y-3 text-sm text-gray-300">
+                                <!-- Model stats will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API Test Tab -->
+                <div id="api-test-tab" class="tab-content hidden">
+                    <h2 class="text-xl font-bold text-white mb-6">API Test Console</h2>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Input Panel -->
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">Test Configuration</h3>
+                            
+                            <!-- Model Selection -->
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-300 mb-2">Select Model</label>
+                                <select id="test-model-select" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-400 focus:outline-none">
+                                    <option value="">Loading models...</option>
+                                </select>
+                            </div>
+
+                            <!-- Message Input -->
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-300 mb-2">Message</label>
+                                <textarea id="test-message" rows="4" 
+                                    placeholder="Enter your test message here..."
+                                    class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-400 focus:outline-none resize-none"></textarea>
+                            </div>
+
+                            <!-- Advanced Options -->
+                            <div class="mb-4">
+                                <button onclick="toggleAdvancedOptions()" class="text-blue-400 hover:text-blue-300 text-sm">
+                                    <i class="fas fa-chevron-right mr-1" id="advanced-chevron"></i>Advanced Options
+                                </button>
+                                <div id="advanced-options" class="hidden mt-3 space-y-3">
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label class="block text-xs text-gray-400 mb-1">Max Tokens</label>
+                                            <input type="number" id="test-max-tokens" value="512" min="1" max="4096"
+                                                class="w-full px-2 py-1 bg-gray-700 text-white rounded border border-gray-600 text-sm">
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-400 mb-1">Temperature</label>
+                                            <input type="number" id="test-temperature" value="0.7" min="0" max="2" step="0.1"
+                                                class="w-full px-2 py-1 bg-gray-700 text-white rounded border border-gray-600 text-sm">
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs text-gray-400 mb-1">System Message (optional)</label>
+                                        <textarea id="test-system-message" rows="2" 
+                                            placeholder="You are a helpful assistant..."
+                                            class="w-full px-2 py-1 bg-gray-700 text-white rounded border border-gray-600 text-sm resize-none"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Test Button -->
+                            <button onclick="testApiCall()" id="test-api-button" 
+                                class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-medium">
+                                <i class="fas fa-play mr-2"></i>Send Test Request
+                            </button>
+                        </div>
+
+                        <!-- Response Panel -->
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-lg font-bold text-white">Response</h3>
+                                <button onclick="clearTestResults()" class="text-gray-400 hover:text-white text-sm">
+                                    <i class="fas fa-trash mr-1"></i>Clear
+                                </button>
+                            </div>
+                            
+                            <!-- Response Display -->
+                            <div id="test-response" class="bg-gray-900 rounded p-4 min-h-[300px] max-h-[500px] overflow-y-auto">
+                                <div class="text-gray-500 text-center py-8">
+                                    <i class="fas fa-comment-dots text-3xl mb-2"></i>
+                                    <p>Response will appear here</p>
+                                </div>
+                            </div>
+
+                            <!-- Response Stats -->
+                            <div id="test-stats" class="hidden mt-4 text-xs text-gray-400 space-y-1">
+                                <div>Response Time: <span id="response-time">-</span>ms</div>
+                                <div>Tokens Generated: <span id="tokens-generated">-</span></div>
+                                <div>Model: <span id="response-model">-</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Request History -->
+                    <div class="mt-6 bg-gray-800 rounded-lg p-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold text-white">Request History</h3>
+                            <button onclick="clearTestHistory()" class="text-gray-400 hover:text-white text-sm">
+                                <i class="fas fa-history mr-1"></i>Clear History
+                            </button>
+                        </div>
+                        <div id="test-history" class="space-y-2 max-h-[200px] overflow-y-auto">
+                            <div class="text-gray-500 text-center py-4">
+                                <p class="text-sm">No tests run yet</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transcribe Tab -->
+                <div id="transcribe-tab" class="tab-content hidden">
+                    <h2 class="text-xl font-bold text-white mb-6">Audio Transcription</h2>
+                    
+                    <div class="bg-gray-800 rounded-lg p-6">
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Audio File</label>
+                            <input type="file" id="audio-file" accept="audio/*" 
+                                class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-400 focus:outline-none">
+                            <p class="text-xs text-gray-500 mt-1">
+                                Supported formats: WAV, MP3, MP4, M4A, FLAC, OGG, WebM
+                            </p>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Audio Model</label>
+                            <select id="whisper-model" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-400 focus:outline-none">
+                                <option value="">Loading available models...</option>
+                            </select>
+                            <p class="text-xs text-gray-500 mt-1">
+                                Only shows locally installed audio transcription models (Whisper, Parakeet, etc.)
+                            </p>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Language (optional)</label>
+                            <select id="transcribe-language" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-400 focus:outline-none">
+                                <option value="">Auto-detect</option>
+                                <option value="en">English</option>
+                                <option value="es">Spanish</option>
+                                <option value="fr">French</option>
+                                <option value="de">German</option>
+                                <option value="it">Italian</option>
+                                <option value="pt">Portuguese</option>
+                                <option value="ru">Russian</option>
+                                <option value="ja">Japanese</option>
+                                <option value="ko">Korean</option>
+                                <option value="zh">Chinese</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Response Format</label>
+                            <select id="response-format" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-400 focus:outline-none">
+                                <option value="json">JSON (text only)</option>
+                                <option value="verbose_json">Verbose JSON (with segments)</option>
+                                <option value="text">Plain text</option>
+                            </select>
+                        </div>
+                        
+                        <button onclick="transcribeAudio()" id="transcribe-button" class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-medium">
+                            <i class="fas fa-microphone mr-2"></i>Transcribe Audio
+                        </button>
+                        
+                        <div id="transcribe-result" class="mt-6 hidden">
+                            <div class="flex justify-between items-center mb-2">
+                                <h3 class="text-lg font-bold text-white">Transcription Result</h3>
+                                <button onclick="clearTranscribeResult()" class="text-gray-400 hover:text-white text-sm">
+                                    <i class="fas fa-trash mr-1"></i>Clear
+                                </button>
+                            </div>
+                            <div id="transcribe-text" class="bg-gray-900 rounded p-4 text-white whitespace-pre-wrap max-h-64 overflow-y-auto"></div>
+                            <div id="transcribe-info" class="mt-2 text-xs text-gray-400"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RAG Tab -->
+                <div id="rag-tab" class="tab-content hidden">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-xl font-bold text-white">RAG Collections</h2>
+                        <button onclick="refreshRagCollections()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
+                            <i class="fas fa-sync-alt mr-2"></i>Refresh
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Create New Collection -->
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">Create New RAG Collection</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Collection Name</label>
+                                    <input type="text" id="rag-collection-name" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Folder Path</label>
+                                    <input type="text" id="rag-folder-path" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
+                                </div>
+                                <div>
+                                    <button onclick="createRagCollection()" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+                                        <i class="fas fa-plus mr-2"></i>Create Collection
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Existing Collections -->
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">Existing RAG Collections</h3>
+                            <div id="rag-collections-list" class="space-y-4">
+                                <!-- RAG collections will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Tab -->
+                <div id="chat-tab" class="tab-content hidden">
+                    <div class="flex h-full">
+                        <!-- Chat History Sidebar -->
+                        <div class="w-80 flex-shrink-0 bg-gray-800 rounded-lg mr-4 flex flex-col">
+                            <!-- Sidebar Header -->
+                            <div class="p-4 border-b border-gray-600">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h3 class="text-lg font-bold text-white">Chat History</h3>
+                                    <button onclick="newChatSession()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
+                                        <i class="fas fa-plus mr-1"></i>New
+                                    </button>
+                                </div>
+                                <input type="text" id="chat-search" placeholder="Search chats..." 
+                                    class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 text-sm focus:border-blue-400 focus:outline-none">
+                            </div>
+                            
+                            <!-- Session List -->
+                            <div id="chat-sessions-list" class="flex-1 overflow-y-auto p-2">
+                                <!-- Chat sessions will be loaded here -->
+                            </div>
+                        </div>
+
+                        <!-- Main Chat Area -->
+                        <div class="flex-1 flex flex-col">
+                            <!-- Chat Header -->
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="flex items-center">
+                                    <h2 class="text-xl font-bold text-white mr-4" id="current-chat-title">RAG Chat</h2>
+                                    <button onclick="editChatTitle()" id="edit-title-btn" class="text-gray-400 hover:text-white hidden">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                </div>
+                                <div class="flex items-center space-x-4">
+                                    <select id="chat-model-select" class="px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-400 focus:outline-none">
+                                        <option value="">Select Model</option>
+                                    </select>
+                                    <select id="chat-rag-select" class="px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-400 focus:outline-none">
+                                        <option value="">No RAG</option>
+                                    </select>
+                                    <button onclick="deleteChatSession()" id="delete-chat-btn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg hidden">
+                                        <i class="fas fa-trash mr-2"></i>Delete
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Chat Messages Area -->
+                            <div id="chat-messages" class="flex-1 overflow-y-auto p-4 bg-gray-800 rounded-lg mb-4" style="height: 500px;">
+                                <div class="text-center text-gray-500 py-8" id="no-chat-placeholder">
+                                    <i class="fas fa-comments text-4xl mb-4"></i>
+                                    <p>Select a chat or start a new conversation</p>
+                                </div>
+                            </div>
+
+                            <!-- Chat Input -->
+                            <div class="flex items-end space-x-2">
+                                <textarea id="chat-input" rows="1" disabled
+                                    class="flex-1 px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-400 focus:outline-none resize-none disabled:opacity-50" 
+                                    placeholder="Select a model and start chatting..."
+                                    onkeydown="handleChatInputKeydown(event)"></textarea>
+                                <button onclick="sendChatMessage()" id="send-chat-btn" disabled
+                                    class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="settings-tab" class="tab-content hidden">
+                    <h2 class="text-xl font-bold text-white mb-6">Settings</h2>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">Model Management</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Auto-unload Inactive Models</label>
+                                    <input type="checkbox" id="auto-unload" class="rounded">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Inactivity Timeout (minutes)</label>
+                                    <input type="number" id="timeout-minutes" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">System Settings</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Max Concurrent Models</label>
+                                    <input type="number" id="max-models" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Log Level</label>
+                                    <select id="log-level" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
+                                        <option value="DEBUG">Debug</option>
+                                        <option value="INFO">Info</option>
+                                        <option value="WARNING">Warning</option>
+                                        <option value="ERROR">Error</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-gray-800 rounded-lg p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">Network Settings</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-2">Server Port</label>
+                                    <input type="number" id="server-port" min="1" max="65535" class="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600">
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        Port number for the server (1-65535). Default is 8000.
+                                    </p>
+                                </div>
+                                <div>
+                                    <label class="flex items-center text-sm font-medium text-gray-300">
+                                        <input type="checkbox" id="bind-all-interfaces" class="rounded mr-2">
+                                        Bind to All Interfaces
+                                    </label>
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        <span class="text-yellow-400">⚠️ Security Risk:</span> Only enable on trusted networks.
+                                    </p>
+                                </div>
+                                <div>
+                                    <button onclick="saveSettings()" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+                                        <i class="fas fa-save mr-2"></i>Save Settings
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="mt-8 text-center text-gray-400 text-sm">
+        <p>MLX-RAG - Apple Silicon AI Model Server v{{ version }}</p>
+        <p>
+            By <strong>Fahim Farook (based on work by Matthew Rogers)</strong>
+            (<a href="https://github.com/FahimF" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300">@FahimF</a>)
+        </p>
+        <p>
+            <a href="https://github.com/FahimF/mlx-rag" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300">
+                <i class="fab fa-github mr-1"></i>View on GitHub
+            </a>
+            |
+            <a href="https://www.gnu.org/licenses/gpl-3.0" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300">
+                GPL v3 License
+            </a>
+        </p>
+    </footer>
+
+    <!-- Enhanced Loading Modal with Progress -->
+    <div id="loading-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="glass rounded-lg p-8 text-center max-w-md w-full mx-4">
+            <i class="fas fa-spinner fa-spin text-4xl text-blue-400 mb-4" id="loading-icon"></i>
+            <p class="text-white text-lg mb-2" id="loading-text">Loading...</p>
+            <div id="loading-details" class="text-gray-300 text-sm mb-4 hidden">
+                <div class="flex justify-between mb-1">
+                    <span id="loading-stage">Initializing...</span>
+                    <span id="loading-time">0s</span>
+                </div>
+                <div class="w-full bg-gray-700 rounded-full h-2 mb-2">
+                    <div id="loading-progress" class="bg-blue-600 h-2 rounded-full transition-all duration-300 progress-glow" style="width: 0%"></div>
+                </div>
+                <div id="loading-status" class="text-xs text-gray-400"></div>
+            </div>
+            <button id="cancel-loading" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm hidden">
+                <i class="fas fa-times mr-1"></i>Cancel
+            </button>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed top-4 right-4 glass rounded-lg p-4 hidden z-50">
+        <div class="flex items-center">
+            <i id="toast-icon" class="fas fa-check-circle text-green-400 mr-3"></i>
+            <span id="toast-message" class="text-white"></span>
+        </div>
+    </div>
+
+    <!-- Restart Confirmation Dialog -->
+    <div id="restart-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="glass rounded-lg p-8 max-w-md w-full mx-4">
+            <div class="text-center">
+                <i class="fas fa-sync-alt text-4xl text-yellow-400 mb-4"></i>
+                <h3 class="text-xl font-bold text-white mb-4">Server Restart Required</h3>
+                <p class="text-gray-300 mb-6">
+                    Network settings have changed (port or bind settings). The server needs to restart for changes to take effect.
+                </p>
+                <div class="flex space-x-4">
+                    <button onclick="restartServerNow()" class="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded">
+                        <i class="fas fa-sync-alt mr-2"></i>Restart Now
+                    </button>
+                    <button onclick="closeRestartDialog()" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded">
+                        <i class="fas fa-clock mr-2"></i>Later
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load JavaScript Modules -->
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/ui.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+    <script src="/static/js/models.js"></script>
+    <script src="/static/js/chat.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
