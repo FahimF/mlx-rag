@@ -58,6 +58,9 @@ class DatabaseManager:
         # Create all tables
         Base.metadata.create_all(bind=self.engine)
         
+        # Run migrations for existing databases
+        self._run_migrations()
+        
         # Enable WAL mode for better concurrency
         with self.engine.connect() as connection:
             connection.execute(text("PRAGMA journal_mode=WAL"))
@@ -96,6 +99,27 @@ class DatabaseManager:
                     setting.set_typed_value(value)
                     session.add(setting)
             session.commit()
+    
+    def _run_migrations(self):
+        """Run database migrations for existing databases."""
+        try:
+            with self.engine.connect() as connection:
+                # Check if trust_remote_code column exists in models table
+                cursor = connection.execute(text("PRAGMA table_info(models)"))
+                columns = cursor.fetchall()
+                column_names = [column[1] for column in columns]
+                
+                if "trust_remote_code" not in column_names:
+                    print("🔄 Running migration: Adding trust_remote_code column to models table")
+                    connection.execute(text("""
+                        ALTER TABLE models 
+                        ADD COLUMN trust_remote_code BOOLEAN NOT NULL DEFAULT 0
+                    """))
+                    connection.commit()
+                    print("✅ Migration completed: trust_remote_code column added")
+        except Exception as e:
+            # Don't crash on startup if migration fails
+            print(f"Warning: Database migration failed: {e}")
     
     def _reset_model_statuses(self):
         """Reset all model statuses to unloaded on startup."""

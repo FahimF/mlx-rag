@@ -494,10 +494,10 @@ class ModelManager:
                     logger.warning(f"Loading model {model_name} with system warning: {hardware_message}")
 
             # Load the model using MLX-LM with retry logic for memory errors
-            logger.info(f"Loading MLX model from {model_path}")
+            logger.info(f"Loading MLX model from {model_path} (trust_remote_code={model_record.trust_remote_code})")
 
             inference_engine = get_inference_engine()
-            mlx_wrapper = self._load_model_with_retry(inference_engine, model_name, model_path, model_record.memory_required_gb)
+            mlx_wrapper = self._load_model_with_retry(inference_engine, model_name, model_path, model_record.memory_required_gb, model_record.trust_remote_code)
 
             # Calculate actual file size + overhead for this model
             actual_memory = self._calculate_actual_memory_usage(model_path)
@@ -632,7 +632,7 @@ class ModelManager:
 
         return False
 
-    def _load_model_with_retry(self, inference_engine, model_name: str, model_path: str, required_memory_gb: float):
+    def _load_model_with_retry(self, inference_engine, model_name: str, model_path: str, required_memory_gb: float, trust_remote_code: bool = False):
         """Load a model with automatic retry and memory management."""
         max_retries = 3
         attempt = 0
@@ -640,7 +640,7 @@ class ModelManager:
         while attempt < max_retries:
             try:
                 # Attempt to load the model
-                mlx_wrapper = inference_engine.load_model(model_name, model_path)
+                mlx_wrapper = inference_engine.load_model(model_name, model_path, trust_remote_code=trust_remote_code)
 
                 if attempt > 0:
                     logger.info(f"✅ Successfully loaded model '{model_name}' on attempt {attempt + 1}")

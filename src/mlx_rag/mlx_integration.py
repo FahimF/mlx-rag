@@ -313,13 +313,34 @@ class MLXModelWrapper:
         return embeddings
 
 
+def _safe_load_with_trust_remote_code(model_path: str, trust_remote_code: bool = False):
+    """Safely load a model with trust_remote_code, falling back if parameter not supported."""
+    try:
+        # First try with trust_remote_code if requested
+        if trust_remote_code:
+            try:
+                return load(model_path, trust_remote_code=trust_remote_code)
+            except TypeError as e:
+                if "unexpected keyword argument 'trust_remote_code'" in str(e):
+                    logger.warning(f"trust_remote_code parameter not supported for {model_path}, trying without it")
+                    return load(model_path)
+                else:
+                    raise
+        else:
+            # If trust_remote_code is False, just load normally
+            return load(model_path)
+    except Exception as e:
+        logger.error(f"Failed to load model {model_path}: {e}")
+        raise
+
+
 class MLXUniversalEmbeddingWrapper(MLXModelWrapper):
     """Universal wrapper for various embedding model architectures."""
     
-    def __init__(self, model_path: str, config: Dict[str, Any]):
+    def __init__(self, model_path: str, config: Dict[str, Any], trust_remote_code: bool = False):
         # Load model and tokenizer
         try:
-            model, tokenizer = load(model_path)
+            model, tokenizer = _safe_load_with_trust_remote_code(model_path, trust_remote_code)
             super().__init__(model, tokenizer, model_path, config)
             self.model_type = "embedding"
             self.architecture = self._detect_architecture(model_path, model)
@@ -481,10 +502,10 @@ class MLXUniversalEmbeddingWrapper(MLXModelWrapper):
 class MLXQwen3EmbeddingWrapper(MLXModelWrapper):
     """Specialized wrapper for Qwen3 embedding models."""
 
-    def __init__(self, model_path: str, config: Dict[str, Any]):
+    def __init__(self, model_path: str, config: Dict[str, Any], trust_remote_code: bool = False):
         # Load model and tokenizer for Qwen3 embeddings
         try:
-            model, tokenizer = load(model_path)
+            model, tokenizer = _safe_load_with_trust_remote_code(model_path, trust_remote_code)
             super().__init__(model, tokenizer, model_path, config)
             self.model_type = "embedding"
             logger.info(f"Loaded Qwen3 embedding model from {model_path}")
@@ -1178,8 +1199,13 @@ class MLXLoader:
             'stage': 'No download in progress'
         }
 
-    def load_model(self, model_path: str) -> MLXModelWrapper:
-        """Load a model using appropriate MLX library."""
+    def load_model(self, model_path: str, trust_remote_code: bool = False) -> MLXModelWrapper:
+        """Load a model using appropriate MLX library.
+        
+        Args:
+            model_path: Path to the model (local path or HuggingFace ID)
+            trust_remote_code: Whether to trust remote code (required for some models with custom code)
+        """
         try:
             logger.info(f"Loading MLX model from {model_path}")
 
@@ -1201,6 +1227,7 @@ class MLXLoader:
                 logger.info(f"Loading Vision model from HuggingFace ID: {model_path}")
                 try:
                     from mlx_vlm import load as vlm_load
+                    # MLX-VLM doesn't support trust_remote_code parameter
                     model, processor = vlm_load(model_path)
                     config = {"estimated_memory_gb": 8.0}  # Default estimate for vision models
                     wrapper = MLXVisionWrapper(
@@ -1265,7 +1292,7 @@ class MLXLoader:
                     # Fallback to regular text model if VLM loading fails
                     logger.warning(f"Failed to load as VLM model, trying as text model: {e}")
                     try:
-                        model, tokenizer = load(model_path)
+                        model, tokenizer = _safe_load_with_trust_remote_code(model_path, trust_remote_code)
                         wrapper = MLXModelWrapper(
                             model=model,
                             tokenizer=tokenizer,
@@ -1371,7 +1398,7 @@ class MLXLoader:
                             # 5. Last resort: standard MLX-LM (will produce logits, not embeddings)
                             logger.warning(f"Failed to load with universal wrapper, trying standard mlx-lm: {universal_e}")
                             try:
-                                model, tokenizer = load(model_path)
+                                model, tokenizer = _safe_load_with_trust_remote_code(model_path, trust_remote_code)
                                 wrapper = MLXModelWrapper(
                                     model=model,
                                     tokenizer=tokenizer,
@@ -1392,7 +1419,7 @@ class MLXLoader:
                 # Standard text generation model (or embedding model treated as text)
                 logger.info(f"Loading as text generation model")
                 try:
-                    model, tokenizer = load(model_path)
+                    model, tokenizer = _safe_load_with_trust_remote_code(model_path, trust_remote_code)
                 except KeyError as e:
                     if str(e) == "'model'":
                         # This is a known bug in MLX-LM's gemma3n implementation
@@ -1439,10 +1466,11 @@ class MLXLoader:
         if any(keyword in path_lower for keyword in ["embedding", "bge-", "e5-", "all-minilm", "sentence", "bert", "arctic-embed"]):
             return "embedding"
 
-        # Vision/multimodal models - includes Gemma 3 vision variants
+        # Vision/multimodal models - includes Gemma 3 vision variants and Kimi VL
         if any(keyword in path_lower for keyword in [
             "vision", "vlm", "multimodal", "llava", "qwen2-vl", "idefics",
-            "gemma-3n", "gemma3n"  # Gemma 3 vision variants use MLX-VLM
+            "gemma-3n", "gemma3n",  # Gemma 3 vision variants use MLX-VLM
+            "kimi-vl", "kimi_vl"  # Kimi VL models
         ]):
             return "vision"
 
@@ -1484,7 +1512,7 @@ class MLXLoader:
         # Default to text generation
         return "text"
 
-    def load_from_hub(self, model_id: str, token: Optional[str] = None) -> MLXModelWrapper:
+    def load_from_hub(self, model_id: str, token: Optional[str] = None, trust_remote_code: bool = False) -> MLXModelWrapper:
         """Load a model directly from HuggingFace Hub."""
         try:
             # Check if model is MLX compatible (with special handling for Arctic models)
@@ -1504,7 +1532,7 @@ class MLXLoader:
 
             # Download and load
             local_path = self.download_model(model_id, token)
-            return self.load_model(local_path)
+            return self.load_model(local_path, trust_remote_code=trust_remote_code)
 
         except Exception as e:
             logger.error(f"Error loading model {model_id} from hub: {e}")
@@ -1550,7 +1578,7 @@ class MLXInferenceEngine:
         self.loader = MLXLoader(cache_dir=cache_dir)
         self._loaded_models: Dict[str, MLXModelWrapper] = {}
 
-    def load_model(self, model_name: str, model_path: str, token: Optional[str] = None) -> MLXModelWrapper:
+    def load_model(self, model_name: str, model_path: str, token: Optional[str] = None, trust_remote_code: bool = False) -> MLXModelWrapper:
         """Load a model by name."""
         if model_name in self._loaded_models:
             return self._loaded_models[model_name]
@@ -1562,10 +1590,10 @@ class MLXInferenceEngine:
 
         # Determine if this is a local path or HuggingFace model ID
         if os.path.exists(model_path):
-            wrapper = self.loader.load_model(model_path)
+            wrapper = self.loader.load_model(model_path, trust_remote_code=trust_remote_code)
         else:
             # Assume it's a HuggingFace model ID
-            wrapper = self.loader.load_from_hub(model_path, token)
+            wrapper = self.loader.load_from_hub(model_path, token, trust_remote_code=trust_remote_code)
 
         self._loaded_models[model_name] = wrapper
         return wrapper

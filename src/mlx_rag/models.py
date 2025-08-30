@@ -71,6 +71,7 @@ class Model(Base):
     use_count = Column(Integer, default=0)
     error_message = Column(Text)
     model_metadata = Column(Text)  # JSON string
+    trust_remote_code = Column(Boolean, nullable=False, default=False)
 
     # Relationships
     capabilities = relationship("ModelCapability", back_populates="model", cascade="all, delete-orphan")
