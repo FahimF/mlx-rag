@@ -1945,6 +1945,8 @@
         }
 
         async function sendMessage() {
+            console.log('🚀 [CHAT] Starting sendMessage');
+
             const input = document.getElementById('chat-input');
             const message = input.value.trim();
             if (!message) return;
@@ -1957,14 +1959,17 @@
                 return;
             }
 
+            console.log('🚀 [CHAT] Request:', { message, model, ragCollection });
+
             // Add user message to history
             chatHistory.push({ role: 'user', content: message });
             renderChatHistory();
             input.value = '';
 
             // Add placeholder for assistant response
-            chatHistory.push({ role: 'assistant', content: '<i class="fas fa-spinner fa-spin"></i>' });
+            chatHistory.push({ role: 'assistant', content: '<i class="fas fa-spinner fa-spin"></i>', isStreaming: true });
             renderChatHistory();
+            // console.log('🚀 [CHAT] Added placeholder, history length:', chatHistory.length);
 
             try {
                 const response = await fetch('/v1/chat', {
@@ -1978,48 +1983,191 @@
                     })
                 });
 
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
                 if (!response.body) {
                     throw new Error('No response body');
                 }
 
+                console.log('🚀 [CHAT] Starting stream processing...');
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
-                let assistantResponse = '';
-                chatHistory.pop(); // Remove placeholder
+                let chunkCount = 0;
+                let lastUpdateTime = Date.now();
+                let fullResponseForLogging = '';
+
+                // Find the placeholder message and clear its content to start receiving the new message
+                const assistantMessage = chatHistory.find(m => m.role === 'assistant' && m.isStreaming);
+                if (assistantMessage) {
+                    console.log('🚀 [CHAT] Found assistant message placeholder. Clearing content.');
+                    assistantMessage.content = '';
+                } else {
+                    // This should not happen if the placeholder was added correctly
+                    // console.error('🚀 [CHAT] ERROR: Could not find placeholder assistant message!');
+                    chatHistory.push({ role: 'assistant', content: '', isStreaming: true });
+                }
+
 
                 while (true) {
                     const { done, value } = await reader.read();
-                    if (done) break;
+                    console.log(`🚀 [CHAT] Stream read #${chunkCount + 1}: done=${done}`);
 
+                    if (done) {
+                        console.log('🚀 [CHAT] Stream finished.');
+                        // console.log('🚀 [CHAT] Full response for logging:', JSON.stringify(fullResponseForLogging));
+                        break;
+                    }
+
+                    chunkCount++;
                     const chunk = decoder.decode(value, { stream: true });
-                    assistantResponse += chunk;
-                    
-                    // Update the last message in history
+                    fullResponseForLogging += chunk;
+                    // console.log(`🚀 [CHAT] Chunk #${chunkCount} (length ${chunk.length}):`, JSON.stringify(chunk));
+
+
+                    // Update the last (and should be only) assistant message
                     const lastMessage = chatHistory[chatHistory.length - 1];
                     if (lastMessage && lastMessage.role === 'assistant') {
-                        lastMessage.content = assistantResponse;
+                        lastMessage.content += chunk; // Append the new chunk
+
+                        // Throttle UI updates to prevent excessive re-renders
+                        const now = Date.now();
+                        if (now - lastUpdateTime > 50) { // Update UI at most every 50ms
+                            renderChatHistory();
+                            lastUpdateTime = now;
+                        }
                     } else {
-                        chatHistory.push({ role: 'assistant', content: assistantResponse });
+                        console.error('🚀 [CHAT] ERROR: No assistant message to update! History:', JSON.stringify(chatHistory, null, 2));
                     }
-                    renderChatHistory();
                 }
+
+                // Final render to show the complete message
+                // console.log('🚀 [CHAT] After loop, rendering final history.');
+                renderChatHistory();
+
+                // Now mark streaming as complete and re-render with markdown
+                const finalMessage = chatHistory[chatHistory.length - 1];
+                if (finalMessage && finalMessage.role === 'assistant') {
+                    console.log('🚀 [CHAT] Marking streaming as complete and enabling markdown');
+                    finalMessage.isStreaming = false; // Enable markdown parsing
+                    renderChatHistory(); // Re-render with markdown
+                } else {
+                    console.error('🚀 [CHAT] ERROR: No final message to mark as complete!');
+                }
+
             } catch (error) {
-                console.error('Error sending message:', error);
+                console.error('🚀 [CHAT] Error sending message:', error);
                 showToast('Failed to get response from model.', 'error');
-                chatHistory.pop(); // Remove placeholder
-                chatHistory.push({ role: 'assistant', content: 'Error: Could not get response.' });
+
+                // Clean up - remove any incomplete messages
+                if (chatHistory.length > 0) {
+                    const lastMessage = chatHistory[chatHistory.length - 1];
+                    if (lastMessage && lastMessage.role === 'assistant' && lastMessage.isStreaming) {
+                        lastMessage.content = `Error: Could not get response - ${error.message}`;
+                        lastMessage.isStreaming = false;
+                    }
+                }
                 renderChatHistory();
             }
         }
 
+        // Simple markdown parser for chat messages
+        function parseMarkdown(text) {
+            if (!text) {
+                // console.log('🎨 [MARKDOWN] Empty text, returning empty string');
+                return '';
+            }
+            
+            // console.log('🎨 [MARKDOWN] Parsing text length:', text.length, 'Preview:', text.substring(0, 100));
+            
+            // Escape HTML first to prevent XSS
+            let html = escapeHtml(text);
+            
+            // Parse markdown syntax
+            // Bold: **text** or __text__
+            html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/__(.*?)__/g, '<strong>$1</strong>');
+            
+            // Italic: *text* or _text_
+            html = html.replace(/\*((?!\*).+?)\*/g, '<em>$1</em>');
+            html = html.replace(/_((?!_).+?)_/g, '<em>$1</em>');
+            
+            // Code blocks: ```code```
+            html = html.replace(/```([\s\S]*?)```/g, '<pre class="bg-gray-900 p-3 rounded mt-2 mb-2 overflow-x-auto"><code class="text-green-400">$1</code></pre>');
+            
+            // Inline code: `code`
+            html = html.replace(/`([^`]+)`/g, '<code class="bg-gray-900 px-1 rounded text-green-400">$1</code>');
+            
+            // Headers: ## Header
+            html = html.replace(/^### (.*$)/gm, '<h3 class="text-lg font-semibold text-white mt-3 mb-2">$1</h3>');
+            html = html.replace(/^## (.*$)/gm, '<h2 class="text-xl font-semibold text-white mt-4 mb-2">$1</h2>');
+            html = html.replace(/^# (.*$)/gm, '<h1 class="text-2xl font-bold text-white mt-4 mb-3">$1</h1>');
+            
+            // Lists: - item or * item
+            html = html.replace(/^[\s]*[-\*\+] (.+)$/gm, '<li class="ml-4">• $1</li>');
+            // Wrap consecutive list items in <ul>
+            html = html.replace(/(<li[^>]*>.*<\/li>\s*)+/g, '<ul class="my-2">$&</ul>');
+            
+            // Numbered lists: 1. item
+            html = html.replace(/^[\s]*\d+\. (.+)$/gm, '<li class="ml-4">$1</li>');
+            
+            // Links: [text](url)
+            html = html.replace(/\[([^\]]+)\]\(([^\)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300 underline">$1</a>');
+            
+            // Line breaks: convert \n to <br> but preserve structure
+            html = html.replace(/\n/g, '<br>');
+            
+            console.log('🎨 [MARKDOWN] Parsed HTML length:', html.length);
+            return html;
+        }
+
         function renderChatHistory() {
-            const container = document.getElementById('chat-history');
-            container.innerHTML = chatHistory.map(msg => `
-                <div class="p-4 rounded-lg ${msg.role === 'user' ? 'bg-gray-700' : 'bg-gray-800'}">
-                    <p class="text-white whitespace-pre-wrap">${msg.content}</p>
-                </div>
-            `).join('<div class="h-4"></div>');
-            container.scrollTop = container.scrollHeight;
+           console.log('🎨 [RENDER] Rendering chat history. Number of messages:', chatHistory.length);
+           console.log('🎨 [RENDER] chatHistory:', JSON.stringify(chatHistory.map(m => ({role: m.role, isStreaming: m.isStreaming, contentLength: m.content.length})), null, 2));
+
+           const container = document.getElementById('chat-history');
+           container.innerHTML = chatHistory.map((msg, index) => {
+               console.log(`🎨 [RENDER] Processing message ${index}:`, {
+                   role: msg.role,
+                   isStreaming: msg.isStreaming,
+                   contentLength: msg.content?.length,
+                   contentPreview: msg.content?.substring(0, 50) + (msg.content?.length > 50 ? '...' : '')
+               });
+
+               // Only parse markdown for completed assistant messages
+               let content;
+               if (msg.role === 'user') {
+                   content = escapeHtml(msg.content);
+               } else {
+                   // Check if this is a streaming message (has a streaming flag)
+                   if (msg.isStreaming) {
+                       console.log(`🎨 [RENDER] Message ${index}: Using escaped HTML (streaming)`);
+                       content = escapeHtml(msg.content);
+                   } else {
+                       console.log(`🎨 [RENDER] Message ${index}: Using markdown parsing (complete)`);
+                       content = parseMarkdown(msg.content);
+                   }
+               }
+
+               return `
+                   <div class="p-4 rounded-lg ${msg.role === 'user' ? 'bg-gray-700' : 'bg-gray-800'}">
+                       <div class="text-white ${msg.role === 'user' || msg.isStreaming ? 'whitespace-pre-wrap' : ''}" >${content}</div>
+                   </div>
+               `;
+           }).join('<div class="h-4"></div>');
+
+           // Auto-scroll to bottom
+           const scrollHeight = container.scrollHeight;
+           const clientHeight = container.clientHeight;
+           const scrollTop = container.scrollTop;
+
+           console.log('🎨 [RENDER] Scroll info:', { scrollHeight, clientHeight, scrollTop, shouldScroll: scrollTop + clientHeight >= scrollHeight - 100 });
+
+           // Only auto-scroll if user is near the bottom (within 100px)
+           if (scrollTop + clientHeight >= scrollHeight - 100) {
+               container.scrollTop = scrollHeight;
+           }
         }
 
         // RAG functions

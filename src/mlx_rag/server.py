@@ -715,6 +715,10 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Message and model are required.")
 
         async def stream_response():
+            chunk_count = 0
+            last_chunk = ""
+            duplicate_count = 0
+            
             try:
                 # Check if model exists in database
                 model_record = db.query(Model).filter(Model.name == model_name).first()
@@ -778,16 +782,51 @@ def create_app() -> FastAPI:
 
                 # Generate the response
                 from mlx_rag.mlx_integration import GenerationConfig
-                config = GenerationConfig()
+                config = GenerationConfig(
+                    max_tokens=2048,  # Limit max tokens to prevent infinite generation
+                    temperature=0.7
+                )
+                
+                logger.info(f"🚀 [STREAM] Starting generation for model: {model_name}")
+                logger.info(f"🚀 [STREAM] Prompt length: {len(prompt)} characters")
+                logger.info(f"🚀 [STREAM] Config: max_tokens={config.max_tokens}, temp={config.temperature}")
                 
                 async for chunk in language_model.mlx_wrapper.generate_stream(prompt, config):
+                    chunk_count += 1
+                    
+                    # Skip empty chunks
+                    if not chunk or not chunk.strip():
+                        logger.debug(f"🚀 [STREAM] Skipping empty chunk {chunk_count}")
+                        continue
+                        
+                    # Detect infinite repetition
+                    if chunk == last_chunk:
+                        duplicate_count += 1
+                        if duplicate_count > 10:  # More than 10 identical chunks = infinite loop
+                            logger.error(f"🚀 [STREAM] Detected infinite repetition at chunk {chunk_count}, terminating")
+                            break
+                    else:
+                        duplicate_count = 0
+                        last_chunk = chunk
+                    
+                    # Log every 100th chunk for debugging
+                    if chunk_count % 100 == 0 or chunk_count <= 10:
+                        logger.info(f"🚀 [STREAM] Chunk {chunk_count}: {repr(chunk[:50])}")
+                    
+                    # Safety limit to prevent runaway generation
+                    if chunk_count > 5000:
+                        logger.error(f"🚀 [STREAM] Hit safety limit at {chunk_count} chunks, terminating")
+                        break
+                    
                     yield chunk
+                
+                logger.info(f"🚀 [STREAM] Generation completed after {chunk_count} chunks")
                     
             except Exception as e:
-                logger.error(f"Error in chat endpoint: {e}", exc_info=True)
+                logger.error(f"🚀 [STREAM] Error in chat endpoint after {chunk_count} chunks: {e}", exc_info=True)
                 yield f"Error: {str(e)}"
 
-        return StreamingResponse(stream_response(), media_type="text/event-stream")
+        return StreamingResponse(stream_response(), media_type="text/plain")
 
     @app.get("/v1/models/{model_name}")
     async def get_model(model_name: str, db: Session = Depends(get_db_session)):
