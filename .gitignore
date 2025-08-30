@@ -265,3 +265,4 @@ rthooks/
 
 # Backup files
 *_backup.txt
+integration_test_report.txt

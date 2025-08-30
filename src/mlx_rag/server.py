@@ -28,7 +28,9 @@ from mlx_rag.rag_manager import get_rag_manager
 from mlx_rag.mlx_integration import GenerationConfig, get_inference_engine
 from mlx_rag.inference_queue_manager import get_inference_manager, QueuedRequest
 from mlx_rag.queued_inference import queued_generate_text, queued_generate_text_stream, queued_transcribe_audio, queued_generate_speech, queued_generate_embeddings, queued_generate_vision
+from mlx_rag.tool_executor import get_tool_executor, ToolExecutionResult
 from mlx_rag import __version__
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +67,35 @@ class ChatMessageContent(BaseModel):
     text: Optional[str] = None
     image_url: Optional[Union[Dict[str, str], str]] = None  # Can be dict or direct string
 
+
+class ToolCall(BaseModel):
+    """Tool call in a message."""
+    id: str
+    type: str = "function"
+    function: Dict[str, Any]
+
+
+class ToolChoice(BaseModel):
+    """Tool choice for function calling."""
+    type: str = "function"
+    function: Optional[Dict[str, str]] = None
+
+
+class Tool(BaseModel):
+    """Tool definition for function calling."""
+    type: str = "function"
+    function: Dict[str, Any]
+
+
 class ChatCompletionMessage(BaseModel):
-    role: Optional[str] = None  # "system", "user", "assistant"
+    role: Optional[str] = None  # "system", "user", "assistant", "tool"
     content: Optional[Union[str, List[ChatMessageContent]]] = None
     # Alternative image fields that some clients might use
     image: Optional[str] = None  # Single image as base64 or URL
     images: Optional[List[str]] = None  # Multiple images array
+    # Tool calling support
+    tool_calls: Optional[List[ToolCall]] = None
+    tool_call_id: Optional[str] = None  # For tool response messages
 
 
 class ChatCompletionRequest(BaseModel):
@@ -83,6 +108,8 @@ class ChatCompletionRequest(BaseModel):
     repetition_penalty: Optional[float] = 1.0
     seed: Optional[int] = None
     stream: Optional[bool] = False
+    tools: Optional[List[Tool]] = None
+    tool_choice: Optional[Union[str, ToolChoice]] = None
 
 
 class ChatCompletionChoice(BaseModel):
@@ -495,6 +522,137 @@ async def _process_image_urls(image_urls: List[str]) -> List[str]:
         logger.debug(f"Processed image {i+1}: {path}")
 
     return processed_images
+
+
+def _parse_tool_calls_from_text(text: str) -> List[Dict[str, Any]]:
+    """Parse tool calls from LLM response text.
+    
+    This function detects tool calls in various formats:
+    - JSON function calls
+    - XML-style tool tags
+    - Structured tool call patterns
+    """
+    tool_calls = []
+    
+    # Pattern 1: JSON-style function calls
+    # Look for patterns like: {"function": "tool_name", "arguments": {...}}
+    json_pattern = r'\{\s*"function"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[^}]*\})\s*\}'
+    json_matches = re.finditer(json_pattern, text, re.IGNORECASE | re.DOTALL)
+    
+    for match in json_matches:
+        function_name = match.group(1)
+        arguments_str = match.group(2)
+        
+        try:
+            arguments = json.loads(arguments_str)
+            tool_call = {
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": function_name,
+                    "arguments": json.dumps(arguments)
+                }
+            }
+            tool_calls.append(tool_call)
+            logger.debug(f"Parsed JSON tool call: {function_name}")
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse JSON arguments: {arguments_str}")
+    
+    # Pattern 2: XML-style tool calls
+    # Look for patterns like: <tool_call function="tool_name" args='{"key": "value"}'/>
+    xml_pattern = r'<tool_call\s+function="([^"]+)"\s+args=\'([^\']*)\'/?>'
+    xml_matches = re.finditer(xml_pattern, text, re.IGNORECASE | re.DOTALL)
+    
+    for match in xml_matches:
+        function_name = match.group(1)
+        arguments_str = match.group(2)
+        
+        try:
+            arguments = json.loads(arguments_str) if arguments_str else {}
+            tool_call = {
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": function_name,
+                    "arguments": json.dumps(arguments)
+                }
+            }
+            tool_calls.append(tool_call)
+            logger.debug(f"Parsed XML tool call: {function_name}")
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse XML arguments: {arguments_str}")
+    
+    # Pattern 3: Function call patterns with parentheses
+    # Look for patterns like: tool_name({"key": "value"})
+    func_pattern = r'(\w+)\s*\(\s*(\{[^}]*\})\s*\)'
+    func_matches = re.finditer(func_pattern, text, re.IGNORECASE | re.DOTALL)
+    
+    # List of known tool names to avoid false positives
+    known_tools = {'list_directory', 'read_file', 'search_files', 'write_file', 'edit_file'}
+    
+    for match in func_matches:
+        function_name = match.group(1)
+        arguments_str = match.group(2)
+        
+        # Only process if it's a known tool name
+        if function_name in known_tools:
+            try:
+                arguments = json.loads(arguments_str)
+                tool_call = {
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": function_name,
+                        "arguments": json.dumps(arguments)
+                    }
+                }
+                tool_calls.append(tool_call)
+                logger.debug(f"Parsed function call: {function_name}")
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse function arguments: {arguments_str}")
+    
+    # Remove duplicates based on function name and arguments
+    seen = set()
+    unique_tool_calls = []
+    for call in tool_calls:
+        call_key = (call["function"]["name"], call["function"]["arguments"])
+        if call_key not in seen:
+            seen.add(call_key)
+            unique_tool_calls.append(call)
+    
+    if unique_tool_calls:
+        logger.info(f"Detected {len(unique_tool_calls)} tool calls in LLM response")
+    
+    return unique_tool_calls
+
+
+def _create_system_prompt_with_tools(
+    tools: List[Dict[str, Any]], 
+    context: Optional[str] = None,
+    user_query: Optional[str] = None,
+    conversation_history: Optional[List[Dict[str, str]]] = None
+) -> str:
+    """Create a comprehensive system prompt that instructs the LLM on how to use tools.
+    
+    Args:
+        tools: List of available tools in OpenAI format
+        context: Optional context about the current task or domain  
+        user_query: Optional user query for contextual prompt generation
+        conversation_history: Optional conversation history for context
+        
+    Returns:
+        Comprehensive system prompt with tool guidance
+    """
+    from mlx_rag.tool_prompts import generate_tool_system_prompt, generate_contextual_prompt
+    
+    if not tools:
+        return "You are a helpful AI assistant. Provide clear, accurate, and concise responses."
+    
+    # Use contextual prompt generation if user query is available
+    if user_query:
+        return generate_contextual_prompt(tools, user_query, conversation_history)
+    else:
+        return generate_tool_system_prompt(tools, context)
 
 
 @asynccontextmanager
@@ -2716,6 +2874,213 @@ def create_app() -> FastAPI:
         asyncio.get_event_loop().call_later(1.0, restart)
 
         return {"message": "Server restarting with updated settings"}
+
+    @app.get("/v1/tools/prompt/demo")
+    async def demo_tool_prompts(
+        include_examples: bool = True,
+        include_workflows: bool = True,
+        user_query: Optional[str] = None
+    ):
+        """Demonstration endpoint showing tool prompt generation capabilities."""
+        try:
+            from mlx_rag.tool_prompts import (
+                generate_tool_system_prompt, 
+                generate_contextual_prompt,
+                get_tool_usage_summary,
+                validate_tool_call_format
+            )
+            
+            # Sample tools for demonstration
+            sample_tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "list_directory",
+                        "description": "List files and directories in a specified path",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "path": {
+                                    "type": "string",
+                                    "description": "The directory path to list"
+                                },
+                                "recursive": {
+                                    "type": "boolean",
+                                    "description": "Whether to list files recursively",
+                                    "default": False
+                                },
+                                "pattern": {
+                                    "type": "string",
+                                    "description": "Optional file pattern to filter by (e.g., '*.py')"
+                                }
+                            },
+                            "required": ["path"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "description": "Read the contents of a file",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "path": {
+                                    "type": "string",
+                                    "description": "The file path to read"
+                                }
+                            },
+                            "required": ["path"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "search_files",
+                        "description": "Search for content across multiple files",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "The search query or pattern"
+                                },
+                                "path": {
+                                    "type": "string",
+                                    "description": "The directory to search in"
+                                },
+                                "use_regex": {
+                                    "type": "boolean",
+                                    "description": "Whether to treat query as regex pattern",
+                                    "default": False
+                                }
+                            },
+                            "required": ["query", "path"]
+                        }
+                    }
+                }
+            ]
+            
+            results = {
+                "available_tools": len(sample_tools),
+                "tool_summary": get_tool_usage_summary(sample_tools)
+            }
+            
+            # Generate different types of prompts
+            if user_query:
+                # Generate contextual prompt for specific query
+                contextual_prompt = generate_contextual_prompt(
+                    sample_tools, 
+                    user_query, 
+                    conversation_history=[]
+                )
+                results["contextual_prompt"] = {
+                    "user_query": user_query,
+                    "prompt": contextual_prompt,
+                    "length": len(contextual_prompt)
+                }
+            else:
+                # Generate standard system prompt
+                system_prompt = generate_tool_system_prompt(
+                    sample_tools,
+                    context=None,
+                    include_examples=include_examples,
+                    include_workflows=include_workflows
+                )
+                results["system_prompt"] = {
+                    "prompt": system_prompt,
+                    "length": len(system_prompt),
+                    "includes_examples": include_examples,
+                    "includes_workflows": include_workflows
+                }
+            
+            # Demonstrate tool call validation
+            sample_calls = [
+                '{"function": "list_directory", "arguments": {"path": "."}}',
+                '{"function": "invalid_call", "arguments": {}}',
+                'invalid json',
+                '{"function": "read_file", "arguments": {"path": "README.md"}}'
+            ]
+            
+            validation_results = []
+            for call in sample_calls:
+                validation = validate_tool_call_format(call)
+                validation_results.append({
+                    "call": call,
+                    "validation": validation
+                })
+            
+            results["validation_demo"] = validation_results
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error in tool prompt demo: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Tool prompt demo failed: {str(e)}"
+            )
+    
+    @app.get("/v1/tools/prompt/generate")
+    async def generate_tool_prompt(
+        tools_json: Optional[str] = None,
+        context: Optional[str] = None,
+        user_query: Optional[str] = None,
+        include_examples: bool = True,
+        include_workflows: bool = True
+    ):
+        """Generate a tool-enabled system prompt for custom tool sets."""
+        try:
+            from mlx_rag.tool_prompts import generate_tool_system_prompt, generate_contextual_prompt
+            import json
+            
+            # Parse tools if provided
+            tools = []
+            if tools_json:
+                try:
+                    tools = json.loads(tools_json)
+                except json.JSONDecodeError as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid JSON in tools_json parameter: {str(e)}"
+                    )
+            
+            # Generate appropriate prompt type
+            if user_query and tools:
+                prompt = generate_contextual_prompt(tools, user_query, conversation_history=[])
+                prompt_type = "contextual"
+            else:
+                prompt = generate_tool_system_prompt(
+                    tools, 
+                    context=context,
+                    include_examples=include_examples,
+                    include_workflows=include_workflows
+                )
+                prompt_type = "standard"
+            
+            return {
+                "prompt_type": prompt_type,
+                "prompt": prompt,
+                "length": len(prompt),
+                "tool_count": len(tools),
+                "parameters": {
+                    "context": context,
+                    "user_query": user_query,
+                    "include_examples": include_examples,
+                    "include_workflows": include_workflows
+                }
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error generating tool prompt: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Tool prompt generation failed: {str(e)}"
+            )
 
     @app.get("/v1/debug/model/{model_id:path}")
     async def debug_model_info(model_id: str):
