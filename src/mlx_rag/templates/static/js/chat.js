@@ -62,6 +62,7 @@ async function loadChatSession(sessionId) {
         document.getElementById('current-chat-title').textContent = response.title;
         document.getElementById('edit-title-btn').classList.remove('hidden');
         document.getElementById('delete-chat-btn').classList.remove('hidden');
+        document.getElementById('scroll-to-bottom-btn').classList.remove('hidden');
         
         // Set model and RAG collection if available
         if (response.model_name) {
@@ -81,6 +82,12 @@ async function loadChatSession(sessionId) {
         // Hide placeholder and render messages
         document.getElementById('no-chat-placeholder').style.display = 'none';
         renderChatMessages();
+        
+        // Ensure we scroll to bottom after loading the chat session
+        setTimeout(() => {
+            const container = document.getElementById('chat-messages');
+            container.scrollTop = container.scrollHeight;
+        }, 150);
         
         // Update session list selection
         updateSessionSelection(sessionId);
@@ -214,12 +221,21 @@ function renderChatMessages() {
                         </div>
                     </div>
                     <div class="flex-1 min-w-0">
-                        <div class="flex items-center space-x-2 mb-1">
-                            <span class="text-sm font-medium text-white capitalize">${msg.role}</span>
-                            <span class="text-xs text-gray-400">${timestamp}</span>
-                            ${msg.model_name ? `<span class="text-xs text-blue-300">${msg.model_name}</span>` : ''}
-                            ${msg.rag_collection_name ? `<span class="text-xs text-purple-300">RAG: ${msg.rag_collection_name}</span>` : ''}
-                            ${msg.images && msg.images.length > 0 ? `<span class="text-xs text-yellow-400"><i class="fas fa-image mr-1"></i>${msg.images.length} image${msg.images.length > 1 ? 's' : ''}</span>` : ''}
+                        <div class="flex items-center justify-between mb-1">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm font-medium text-white capitalize">${msg.role}</span>
+                                <span class="text-xs text-gray-400">${timestamp}</span>
+                                ${msg.model_name ? `<span class="text-xs text-blue-300">${msg.model_name}</span>` : ''}
+                                ${msg.rag_collection_name ? `<span class="text-xs text-purple-300">RAG: ${msg.rag_collection_name}</span>` : ''}
+                                ${msg.images && msg.images.length > 0 ? `<span class="text-xs text-yellow-400"><i class="fas fa-image mr-1"></i>${msg.images.length} image${msg.images.length > 1 ? 's' : ''}</span>` : ''}
+                            </div>
+                            ${msg.role === 'user' ? `
+                                <button onclick="resubmitMessage(${index})" 
+                                    class="text-gray-400 hover:text-blue-400 p-1 rounded transition-colors" 
+                                    title="Re-submit this message">
+                                    <i class="fas fa-redo text-xs"></i>
+                                </button>
+                            ` : ''}
                         </div>
                         <div class="p-3 rounded-lg ${
                             msg.role === 'user' ? 'bg-gray-700' : 'bg-gray-800'
@@ -321,44 +337,48 @@ async function sendChatMessage() {
     renderChatMessages();
     
     try {
-        let response;
+        // Always use FormData since the backend expects Form fields
+        const formData = new FormData();
+        formData.append('message', message);
+        formData.append('model', model);
+        if (ragCollection) {
+            formData.append('rag_collection', ragCollection);
+        }
+        const historyJson = JSON.stringify(
+            currentChatMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
+        );
+        formData.append('history', historyJson);
         
-        // Check if we have images to send
+        // Add image files if present
         if (imagesToSend.length > 0) {
-            // Create FormData for multipart request
-            const formData = new FormData();
-            formData.append('message', message);
-            formData.append('model', model);
-            if (ragCollection) {
-                formData.append('rag_collection', ragCollection);
-            }
-            formData.append('history', JSON.stringify(
-                currentChatMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
-            ));
-            
-            // Add image files
             imagesToSend.forEach((imageData, index) => {
                 formData.append('images', imageData.file);
             });
-            
-            // Send multipart request
-            response = await fetch('/v1/chat', {
-                method: 'POST',
-                body: formData
-            });
-        } else {
-            // Send regular JSON request for text-only
-            response = await fetch('/v1/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message: message,
-                    model: model,
-                    rag_collection: ragCollection,
-                    history: currentChatMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
-                })
-            });
         }
+        
+        // Debug logging for frontend
+        console.log('=== FRONTEND DEBUG ===');
+        console.log('Message:', message);
+        console.log('Model:', model);
+        console.log('RAG Collection:', ragCollection);
+        console.log('History length:', currentChatMessages.length - 1);
+        console.log('History JSON:', historyJson);
+        console.log('Images count:', imagesToSend.length);
+        console.log('FormData entries:');
+        for (let [key, value] of formData.entries()) {
+            if (value instanceof File) {
+                console.log(`  ${key}: File(${value.name}, ${value.size} bytes, ${value.type})`);
+            } else {
+                console.log(`  ${key}: ${value}`);
+            }
+        }
+        console.log('=== END FRONTEND DEBUG ===');
+        
+        // Send multipart request (works for both text-only and with images)
+        const response = await fetch('/v1/chat', {
+            method: 'POST',
+            body: formData
+        });
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -473,6 +493,7 @@ async function deleteChatSession() {
         document.getElementById('current-chat-title').textContent = 'RAG Chat';
         document.getElementById('edit-title-btn').classList.add('hidden');
         document.getElementById('delete-chat-btn').classList.add('hidden');
+        document.getElementById('scroll-to-bottom-btn').classList.add('hidden');
         document.getElementById('no-chat-placeholder').style.display = 'block';
         document.getElementById('chat-messages').innerHTML = `
             <div class="text-center text-gray-500 py-8" id="no-chat-placeholder">
@@ -525,6 +546,7 @@ async function deleteSession(sessionId) {
             document.getElementById('current-chat-title').textContent = 'RAG Chat';
             document.getElementById('edit-title-btn').classList.add('hidden');
             document.getElementById('delete-chat-btn').classList.add('hidden');
+            document.getElementById('scroll-to-bottom-btn').classList.add('hidden');
             document.getElementById('no-chat-placeholder').style.display = 'block';
             document.getElementById('chat-messages').innerHTML = `
                 <div class="text-center text-gray-500 py-8" id="no-chat-placeholder">
@@ -854,6 +876,51 @@ function clearSelectedImages() {
     updateImagePreview();
 }
 
+// Re-submit a previous user message
+function resubmitMessage(messageIndex) {
+    if (messageIndex < 0 || messageIndex >= currentChatMessages.length) {
+        showToast('Invalid message index', 'error');
+        return;
+    }
+    
+    const message = currentChatMessages[messageIndex];
+    if (message.role !== 'user') {
+        showToast('Can only re-submit user messages', 'error');
+        return;
+    }
+    
+    // Copy the message content to the chat input
+    const chatInput = document.getElementById('chat-input');
+    chatInput.value = message.content;
+    
+    // Focus the input so user can see it and modify if needed
+    chatInput.focus();
+    
+    showToast('Message copied to input field', 'success');
+}
+
+// Scroll to the bottom of the chat (to the input area)
+function scrollToBottom() {
+    // With the new layout, we only need to scroll the chat messages container
+    const chatContainer = document.getElementById('chat-messages');
+    const chatInput = document.getElementById('chat-input');
+    
+    if (chatContainer) {
+        // Smoothly scroll the chat messages container to the bottom
+        chatContainer.scrollTo({
+            top: chatContainer.scrollHeight,
+            behavior: 'smooth'
+        });
+    }
+    
+    // Focus the input field after a short delay
+    if (chatInput) {
+        setTimeout(() => {
+            chatInput.focus();
+        }, 300);
+    }
+}
+
 // Format file size for display
 function formatFileSize(bytes) {
     if (bytes === 0) return '0 Bytes';
@@ -882,3 +949,5 @@ window.triggerImageUpload = triggerImageUpload;
 window.handleImageSelection = handleImageSelection;
 window.removeImage = removeImage;
 window.clearSelectedImages = clearSelectedImages;
+window.resubmitMessage = resubmitMessage;
+window.scrollToBottom = scrollToBottom;

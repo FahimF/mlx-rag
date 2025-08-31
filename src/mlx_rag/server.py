@@ -1131,7 +1131,10 @@ def create_app() -> FastAPI:
         db: Session = Depends(get_db_session)
     ):
         """Handle a chat request with RAG support, auto-loading, and image uploads."""
+        logger.info(f"Chat request received - model: {model}, rag_collection: {rag_collection}, images: {len(images) if images else 0}")
+        
         if not message or not model:
+            logger.error(f"Missing required fields - message: {bool(message)}, model: {bool(model)}")
             raise HTTPException(status_code=400, detail="Message and model are required.")
         
         # Parse history if provided
