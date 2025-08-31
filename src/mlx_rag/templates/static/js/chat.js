@@ -337,54 +337,108 @@ async function sendChatMessage() {
     renderChatMessages();
     
     try {
-        // Always use FormData since the backend expects Form fields
-        const formData = new FormData();
-        formData.append('message', message);
-        formData.append('model', model);
-        if (ragCollection) {
-            formData.append('rag_collection', ragCollection);
-        }
-        const historyJson = JSON.stringify(
-            currentChatMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
+        // Convert images to base64 data URLs for OpenAI endpoint
+        const processedImages = await Promise.all(
+            imagesToSend.map(imageData => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result); // This will be a data URL
+                    reader.onerror = reject;
+                    reader.readAsDataURL(imageData.file);
+                });
+            })
         );
-        formData.append('history', historyJson);
         
-        // Add image files if present
-        if (imagesToSend.length > 0) {
-            imagesToSend.forEach((imageData, index) => {
-                formData.append('images', imageData.file);
+        // Build messages array for OpenAI format
+        const messages = [];
+        
+        // Add chat history
+        currentChatMessages.slice(0, -1).forEach(msg => {
+            if (msg.role === 'user' || msg.role === 'assistant') {
+                messages.push({
+                    role: msg.role,
+                    content: msg.content
+                });
+            }
+        });
+        
+        // Add current user message with images if present
+        let userMessageContent;
+        if (processedImages.length > 0) {
+            // Multimodal content format
+            userMessageContent = [
+                { type: 'text', text: message }
+            ];
+            processedImages.forEach(imageDataUrl => {
+                userMessageContent.push({
+                    type: 'image_url',
+                    image_url: { url: imageDataUrl }
+                });
+            });
+        } else {
+            // Text-only content
+            userMessageContent = message;
+        }
+        
+        messages.push({
+            role: 'user',
+            content: userMessageContent
+        });
+        
+        // Get available tools for the active RAG collection
+        let availableTools = [];
+        try {
+            const toolsResponse = await apiCall('/v1/tools');
+            if (toolsResponse.tools && toolsResponse.tools.length > 0) {
+                availableTools = toolsResponse.tools;
+                console.log(`Found ${availableTools.length} available tools for RAG collection`);
+            }
+        } catch (error) {
+            console.log('No tools available or error fetching tools:', error);
+        }
+        
+        // Prepare OpenAI chat completion request
+        const requestBody = {
+            model: model,
+            messages: messages,
+            max_tokens: 2048,
+            temperature: 0.7,
+            stream: true
+        };
+        
+        // Add tools if available
+        if (availableTools.length > 0) {
+            requestBody.tools = availableTools;
+            requestBody.tool_choice = 'auto';
+        }
+        
+        // Add RAG collection context by adding a system message
+        if (ragCollection) {
+            // Insert system message at the beginning to include RAG context instruction
+            messages.unshift({
+                role: 'system',
+                content: `You have access to a RAG collection named "${ragCollection}". Use the context from this collection to provide more accurate and detailed responses when relevant.`
             });
         }
         
-        // Debug logging for frontend
-        console.log('=== FRONTEND DEBUG ===');
-        console.log('Message:', message);
-        console.log('Model:', model);
-        console.log('RAG Collection:', ragCollection);
-        console.log('History length:', currentChatMessages.length - 1);
-        console.log('History JSON:', historyJson);
-        console.log('Images count:', imagesToSend.length);
-        console.log('FormData entries:');
-        for (let [key, value] of formData.entries()) {
-            if (value instanceof File) {
-                console.log(`  ${key}: File(${value.name}, ${value.size} bytes, ${value.type})`);
-            } else {
-                console.log(`  ${key}: ${value}`);
-            }
-        }
-        console.log('=== END FRONTEND DEBUG ===');
+        console.log('=== OPENAI REQUEST DEBUG ===');
+        console.log('Request body:', JSON.stringify(requestBody, null, 2));
+        console.log('=== END DEBUG ===');
         
-        // Send multipart request (works for both text-only and with images)
-        const response = await fetch('/v1/chat', {
+        // Send to OpenAI-compatible endpoint
+        const response = await fetch('/v1/chat/completions', {
             method: 'POST',
-            body: formData
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
         });
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
-        // Stream the response
+        // Stream the response (OpenAI format)
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let fullResponse = '';
@@ -394,11 +448,41 @@ async function sendChatMessage() {
             if (done) break;
             
             const chunk = decoder.decode(value, { stream: true });
-            fullResponse += chunk;
             
-            // Update the assistant message
-            assistantMessage.content = fullResponse;
-            renderChatMessages();
+            // Parse Server-Sent Events format
+            const lines = chunk.split('\n');
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6); // Remove 'data: ' prefix
+                    
+                    if (data === '[DONE]') {
+                        break;
+                    }
+                    
+                    try {
+                        const parsed = JSON.parse(data);
+                        const choice = parsed.choices?.[0];
+                        if (choice?.delta?.content) {
+                            fullResponse += choice.delta.content;
+                            
+                            // Update the assistant message
+                            assistantMessage.content = fullResponse;
+                            renderChatMessages();
+                        }
+                        
+                        // Handle tool calls if present
+                        if (choice?.delta?.tool_calls) {
+                            console.log('Tool calls detected:', choice.delta.tool_calls);
+                            // Note: For now we'll just log tool calls
+                            // Full tool call handling would require more complex state management
+                        }
+                        
+                    } catch (parseError) {
+                        // Skip invalid JSON chunks
+                        console.debug('Skipping invalid JSON chunk:', data);
+                    }
+                }
+            }
         }
         
         // Mark streaming as complete

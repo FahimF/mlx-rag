@@ -2100,6 +2100,7 @@ def create_app() -> FastAPI:
             # Check if tools are provided
             has_tools = request.tools is not None and len(request.tools) > 0
             tool_executor = None
+            intelligent_executor = None
             
             # Initialize tool executor if tools are requested
             if has_tools:
@@ -2107,12 +2108,48 @@ def create_app() -> FastAPI:
                 active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
                 if active_collection:
                     tool_executor = get_tool_executor(active_collection.path)
+                    
+                    # Initialize intelligent tool executor for auto-execution
+                    from mlx_rag.intelligent_tool_executor import get_intelligent_tool_executor
+                    intelligent_executor = get_intelligent_tool_executor(active_collection.path)
+                    
                     logger.info(f"Tool executor initialized with collection path: {active_collection.path}")
                 else:
                     logger.warning("Tools requested but no active RAG collection found")
+                    
+            # Auto-execute tools based on user query analysis
+            tool_results = []
+            auto_context = ""
+            
+            # Get messages from request early for tool analysis
+            messages = request.messages
+            
+            if intelligent_executor and messages:
+                # Get the last user message for analysis
+                user_messages = [msg for msg in messages if msg.role == "user"]
+                if user_messages:
+                    last_user_message = user_messages[-1]
+                    user_query = ""
+                    
+                    # Extract text content from the message
+                    if isinstance(last_user_message.content, str):
+                        user_query = last_user_message.content
+                    elif isinstance(last_user_message.content, list):
+                        # Extract text from multimodal content
+                        text_parts = [item.text for item in last_user_message.content if hasattr(item, 'text') and item.text]
+                        user_query = " ".join(text_parts)
+                    
+                    if user_query:
+                        logger.info(f"Running intelligent tool analysis for query: {user_query[:100]}...")
+                        tool_results, auto_context = await intelligent_executor.analyze_and_execute_tools(
+                            user_query, 
+                            [msg.model_dump() for msg in messages[:-1]]  # Previous conversation history
+                        )
+                        
+                        if tool_results:
+                            logger.info(f"Auto-executed {len(tool_results)} tools, generated context: {len(auto_context)} chars")
 
             # Add default system prompt if none provided
-            messages = request.messages
             has_system_message = any(msg.role == "system" for msg in messages)
 
             # Extract structured messages and image URLs first to check if we have images
