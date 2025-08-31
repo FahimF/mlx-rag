@@ -1122,15 +1122,56 @@ def create_app() -> FastAPI:
             )
 
     @app.post("/v1/chat")
-    async def chat(request: dict, db: Session = Depends(get_db_session)):
-        """Handle a chat request with RAG support and auto-loading."""
-        message = request.get("message")
-        model_name = request.get("model")
-        rag_collection_name = request.get("rag_collection")
-        history = request.get("history", [])
-
-        if not message or not model_name:
+    async def chat(
+        message: str = Form(...),
+        model: str = Form(...),
+        rag_collection: Optional[str] = Form(None),
+        history: Optional[str] = Form(None),
+        images: Optional[List[UploadFile]] = File(None),
+        db: Session = Depends(get_db_session)
+    ):
+        """Handle a chat request with RAG support, auto-loading, and image uploads."""
+        if not message or not model:
             raise HTTPException(status_code=400, detail="Message and model are required.")
+        
+        # Parse history if provided
+        parsed_history = []
+        if history:
+            try:
+                parsed_history = json.loads(history)
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid history JSON, using empty history: {history}")
+                parsed_history = []
+        
+        # Process uploaded images if any
+        image_urls = []
+        if images:
+            logger.info(f"Processing {len(images)} uploaded images")
+            for i, image_file in enumerate(images):
+                try:
+                    # Validate image file
+                    if not image_file.content_type or not image_file.content_type.startswith('image/'):
+                        logger.warning(f"Skipping non-image file: {image_file.filename}")
+                        continue
+                    
+                    # Read image content and convert to base64
+                    image_content = await image_file.read()
+                    import base64
+                    
+                    # Create data URL
+                    mime_type = image_file.content_type
+                    base64_data = base64.b64encode(image_content).decode('utf-8')
+                    data_url = f"data:{mime_type};base64,{base64_data}"
+                    
+                    image_urls.append(data_url)
+                    logger.debug(f"Processed uploaded image {i+1}: {image_file.filename} ({len(image_content)} bytes)")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing uploaded image {i+1}: {e}")
+                    continue
+        
+        model_name = model
+        rag_collection_name = rag_collection
 
         async def stream_response():
             chunk_count = 0
@@ -1187,58 +1228,134 @@ def create_app() -> FastAPI:
                         logger.error(f"Error retrieving RAG context: {e}")
                         yield f"Warning: Could not retrieve RAG context from '{rag_collection_name}': {e}\n\n"
 
-                # Construct the prompt
-                prompt = ""
-                if rag_context:
-                    prompt += f"Context (relevant code and documentation):\n{rag_context}\n\nPlease use the above context to answer the following question.\n\n"
+                # Check if this is a vision model and we have images
+                is_vision_model = False
+                if language_model and hasattr(language_model.mlx_wrapper, 'model_type'):
+                    is_vision_model = language_model.mlx_wrapper.model_type == "vision"
                 
-                # Add history to prompt
-                for msg in history:
-                    prompt += f"{msg['role']}: {msg['content']}\n"
+                logger.debug(f"Vision model: {is_vision_model}, Images: {len(image_urls)}")
                 
-                prompt += f"user: {message}\nassistant:"
-
-                # Generate the response
-                from mlx_rag.mlx_integration import GenerationConfig
-                config = GenerationConfig(
-                    max_tokens=2048,  # Limit max tokens to prevent infinite generation
-                    temperature=0.7
-                )
-                
-                logger.info(f"🚀 [STREAM] Starting generation for model: {model_name}")
-                logger.info(f"🚀 [STREAM] Prompt length: {len(prompt)} characters")
-                logger.info(f"🚀 [STREAM] Config: max_tokens={config.max_tokens}, temp={config.temperature}")
-                
-                async for chunk in language_model.mlx_wrapper.generate_stream(prompt, config):
-                    chunk_count += 1
-                    
-                    # Skip empty chunks
-                    if not chunk or not chunk.strip():
-                        logger.debug(f"🚀 [STREAM] Skipping empty chunk {chunk_count}")
-                        continue
+                if is_vision_model and image_urls:
+                    # For vision models with images, use vision processing
+                    try:
+                        # Create ChatCompletionMessage objects for vision processing
+                        multimodal_content = []
+                        multimodal_content.append(ChatMessageContent(type="text", text=message))
+                        for image_url in image_urls:
+                            multimodal_content.append(ChatMessageContent(
+                                type="image_url", 
+                                image_url={"url": image_url}
+                            ))
                         
-                    # Detect infinite repetition
-                    if chunk == last_chunk:
-                        duplicate_count += 1
-                        if duplicate_count > 10:  # More than 10 identical chunks = infinite loop
-                            logger.error(f"🚀 [STREAM] Detected infinite repetition at chunk {chunk_count}, terminating")
+                        # Create structured messages
+                        structured_messages = []
+                        for msg in parsed_history:
+                            structured_messages.append(ChatCompletionMessage(
+                                role=msg.get("role", "user"),
+                                content=msg.get("content", "")
+                            ))
+                        
+                        # Add the current user message with images
+                        structured_messages.append(ChatCompletionMessage(
+                            role="user",
+                            content=multimodal_content
+                        ))
+                        
+                        # Extract chat messages and images for vision processing
+                        chat_messages, processed_images = _format_chat_prompt(structured_messages)
+                        
+                        # Process image paths
+                        processed_image_paths = await _process_image_urls(processed_images)
+                        
+                        # Generate using vision model
+                        config = GenerationConfig(
+                            max_tokens=2048,
+                            temperature=0.7
+                        )
+                        
+                        result = await queued_generate_vision(model_name, chat_messages, processed_image_paths, config)
+                        
+                        # Clean up temporary image files
+                        for img_path in processed_image_paths:
+                            try:
+                                import os
+                                os.unlink(img_path)
+                            except Exception as e:
+                                logger.warning(f"Failed to cleanup temporary image file {img_path}: {e}")
+                        
+                        # Stream the result
+                        content = result.text if result else "Error: Vision processing failed"
+                        
+                        # Stream in chunks for better UX
+                        chunk_size = 20
+                        for i in range(0, len(content), chunk_size):
+                            chunk = content[i:i+chunk_size]
+                            yield chunk
+                            # Small delay for streaming effect
+                            import asyncio
+                            await asyncio.sleep(0.02)
+                        
+                        logger.info(f"🚀 [VISION-STREAM] Vision processing completed, streamed {len(content)} characters")
+                        return
+                        
+                    except Exception as vision_error:
+                        logger.error(f"Vision processing failed: {vision_error}")
+                        yield f"Error: Vision processing failed: {str(vision_error)}"
+                        return
+                else:
+                    # For text-only models or no images, use standard text generation
+                    # Construct the prompt
+                    prompt = ""
+                    if rag_context:
+                        prompt += f"Context (relevant code and documentation):\n{rag_context}\n\nPlease use the above context to answer the following question.\n\n"
+                    
+                    # Add history to prompt
+                    for msg in parsed_history:
+                        prompt += f"{msg['role']}: {msg['content']}\n"
+                    
+                    prompt += f"user: {message}\nassistant:"
+
+                    # Generate the response
+                    from mlx_rag.mlx_integration import GenerationConfig
+                    config = GenerationConfig(
+                        max_tokens=2048,  # Limit max tokens to prevent infinite generation
+                        temperature=0.7
+                    )
+                    
+                    logger.info(f"🚀 [STREAM] Starting generation for model: {model_name}")
+                    logger.info(f"🚀 [STREAM] Prompt length: {len(prompt)} characters")
+                    logger.info(f"🚀 [STREAM] Config: max_tokens={config.max_tokens}, temp={config.temperature}")
+                    
+                    async for chunk in language_model.mlx_wrapper.generate_stream(prompt, config):
+                        chunk_count += 1
+                        
+                        # Skip empty chunks
+                        if not chunk or not chunk.strip():
+                            logger.debug(f"🚀 [STREAM] Skipping empty chunk {chunk_count}")
+                            continue
+                            
+                        # Detect infinite repetition
+                        if chunk == last_chunk:
+                            duplicate_count += 1
+                            if duplicate_count > 10:  # More than 10 identical chunks = infinite loop
+                                logger.error(f"🚀 [STREAM] Detected infinite repetition at chunk {chunk_count}, terminating")
+                                break
+                        else:
+                            duplicate_count = 0
+                            last_chunk = chunk
+                        
+                        # Log every 100th chunk for debugging
+                        if chunk_count % 100 == 0 or chunk_count <= 10:
+                            logger.info(f"🚀 [STREAM] Chunk {chunk_count}: {repr(chunk[:50])}")
+                        
+                        # Safety limit to prevent runaway generation
+                        if chunk_count > 5000:
+                            logger.error(f"🚀 [STREAM] Hit safety limit at {chunk_count} chunks, terminating")
                             break
-                    else:
-                        duplicate_count = 0
-                        last_chunk = chunk
+                        
+                        yield chunk
                     
-                    # Log every 100th chunk for debugging
-                    if chunk_count % 100 == 0 or chunk_count <= 10:
-                        logger.info(f"🚀 [STREAM] Chunk {chunk_count}: {repr(chunk[:50])}")
-                    
-                    # Safety limit to prevent runaway generation
-                    if chunk_count > 5000:
-                        logger.error(f"🚀 [STREAM] Hit safety limit at {chunk_count} chunks, terminating")
-                        break
-                    
-                    yield chunk
-                
-                logger.info(f"🚀 [STREAM] Generation completed after {chunk_count} chunks")
+                    logger.info(f"🚀 [STREAM] Generation completed after {chunk_count} chunks")
                     
             except Exception as e:
                 logger.error(f"🚀 [STREAM] Error in chat endpoint after {chunk_count} chunks: {e}", exc_info=True)
@@ -2931,6 +3048,60 @@ def create_app() -> FastAPI:
         asyncio.get_event_loop().call_later(1.0, restart)
 
         return {"message": "Server restarting with updated settings"}
+
+    @app.get("/v1/models/current/capabilities")
+    async def get_current_model_capabilities():
+        """Get capabilities of currently loaded models (vision support, etc.)."""
+        try:
+            model_manager = get_model_manager()
+            loaded_models = model_manager.get_loaded_models()
+            
+            capabilities = {
+                "models": [],
+                "has_vision_model": False,
+                "has_text_model": False,
+                "has_audio_model": False,
+                "has_embedding_model": False
+            }
+            
+            for model_name in loaded_models:
+                loaded_model = model_manager.get_model_for_inference(model_name)
+                if loaded_model:
+                    model_caps = {
+                        "name": model_name,
+                        "type": getattr(loaded_model.mlx_wrapper, 'model_type', 'text'),
+                        "supports_vision": False,
+                        "supports_text": True,
+                        "supports_audio": False,
+                        "supports_embeddings": False
+                    }
+                    
+                    # Check model type and capabilities
+                    model_type = getattr(loaded_model.mlx_wrapper, 'model_type', 'text')
+                    
+                    if model_type == 'vision':
+                        model_caps["supports_vision"] = True
+                        capabilities["has_vision_model"] = True
+                    elif model_type == 'whisper' or model_type == 'audio':
+                        model_caps["supports_audio"] = True
+                        capabilities["has_audio_model"] = True
+                    elif model_type == 'embedding':
+                        model_caps["supports_embeddings"] = True
+                        capabilities["has_embedding_model"] = True
+                    else:
+                        # Default to text model
+                        capabilities["has_text_model"] = True
+                    
+                    capabilities["models"].append(model_caps)
+            
+            return capabilities
+            
+        except Exception as e:
+            logger.error(f"Error getting model capabilities: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error getting model capabilities: {str(e)}"
+            )
 
     @app.get("/v1/tools")
     async def get_available_tools(db: Session = Depends(get_db_session)):

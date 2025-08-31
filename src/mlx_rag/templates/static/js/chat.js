@@ -183,6 +183,22 @@ function renderChatMessages() {
             }
         }
         
+        // Generate images display for user messages
+        let imagesHtml = '';
+        if (msg.role === 'user' && msg.images && msg.images.length > 0) {
+            imagesHtml = `
+                <div class="mt-2 flex flex-wrap gap-2">
+                    ${msg.images.map(img => `
+                        <div class="bg-gray-600 rounded-lg p-2 flex items-center space-x-2 text-xs">
+                            <i class="fas fa-image text-blue-400"></i>
+                            <span class="text-gray-300">${img.name}</span>
+                            <span class="text-gray-500">(${formatFileSize(img.size)})</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+        
         const timestamp = msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : '';
         
         return `
@@ -203,6 +219,7 @@ function renderChatMessages() {
                             <span class="text-xs text-gray-400">${timestamp}</span>
                             ${msg.model_name ? `<span class="text-xs text-blue-300">${msg.model_name}</span>` : ''}
                             ${msg.rag_collection_name ? `<span class="text-xs text-purple-300">RAG: ${msg.rag_collection_name}</span>` : ''}
+                            ${msg.images && msg.images.length > 0 ? `<span class="text-xs text-yellow-400"><i class="fas fa-image mr-1"></i>${msg.images.length} image${msg.images.length > 1 ? 's' : ''}</span>` : ''}
                         </div>
                         <div class="p-3 rounded-lg ${
                             msg.role === 'user' ? 'bg-gray-700' : 'bg-gray-800'
@@ -210,6 +227,7 @@ function renderChatMessages() {
                             <div class="text-white ${
                                 msg.role === 'user' || msg.isStreaming ? 'whitespace-pre-wrap' : ''
                             }">${content}</div>
+                            ${imagesHtml}
                         </div>
                     </div>
                 </div>
@@ -227,7 +245,12 @@ function renderChatMessages() {
 async function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const message = input.value.trim();
-    if (!message) return;
+    
+    // Check if we have message or images
+    if (!message && selectedImages.length === 0) {
+        showToast('Please enter a message or attach images', 'error');
+        return;
+    }
     
     const model = document.getElementById('chat-model-select').value;
     const ragCollection = document.getElementById('chat-rag-select').value;
@@ -237,23 +260,39 @@ async function sendChatMessage() {
         return;
     }
     
+    // Check if images are selected but model doesn't support vision
+    const selectedModel = availableChatModels.find(m => m.name === model);
+    const supportsVision = selectedModel && selectedModel.type === 'multimodal';
+    
+    if (selectedImages.length > 0 && !supportsVision) {
+        showToast('Selected model does not support image input. Please select a multimodal model.', 'error');
+        return;
+    }
+    
     if (!currentChatSession) {
         // Create new session if none exists
         await newChatSession();
         if (!currentChatSession) return;
     }
     
-    // Add user message locally
+    // Store images for local display (we'll need this for the user message)
+    const imagesToSend = [...selectedImages];
+    
+    // Add user message locally (with image info if present)
     const userMessage = {
         role: 'user',
         content: message,
         created_at: new Date().toISOString(),
-        isStreaming: false
+        isStreaming: false,
+        images: imagesToSend.length > 0 ? imagesToSend.map(img => ({ name: img.name, size: img.size })) : undefined
     };
     
     currentChatMessages.push(userMessage);
     renderChatMessages();
     input.value = '';
+    
+    // Clear selected images from the UI
+    clearSelectedImages();
     
     // Save user message to server
     try {
@@ -282,17 +321,44 @@ async function sendChatMessage() {
     renderChatMessages();
     
     try {
-        // Use the existing chat endpoint for streaming
-        const response = await fetch('/v1/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: message,
-                model: model,
-                rag_collection: ragCollection,
-                history: currentChatMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
-            })
-        });
+        let response;
+        
+        // Check if we have images to send
+        if (imagesToSend.length > 0) {
+            // Create FormData for multipart request
+            const formData = new FormData();
+            formData.append('message', message);
+            formData.append('model', model);
+            if (ragCollection) {
+                formData.append('rag_collection', ragCollection);
+            }
+            formData.append('history', JSON.stringify(
+                currentChatMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
+            ));
+            
+            // Add image files
+            imagesToSend.forEach((imageData, index) => {
+                formData.append('images', imageData.file);
+            });
+            
+            // Send multipart request
+            response = await fetch('/v1/chat', {
+                method: 'POST',
+                body: formData
+            });
+        } else {
+            // Send regular JSON request for text-only
+            response = await fetch('/v1/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: message,
+                    model: model,
+                    rag_collection: ragCollection,
+                    history: currentChatMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
+                })
+            });
+        }
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -522,27 +588,31 @@ async function editSessionTitle(sessionId) {
     }
 }
 
+// Global variable to track available models with their capabilities
+let availableChatModels = [];
+
 // Load available models for chat
 async function loadChatModels() {
     try {
         const response = await apiCall('/v1/manager/models');
         const models = response.models || [];
-        const availableModels = models.filter(m => m.type === 'text' || m.type === 'multimodal');
+        availableChatModels = models.filter(m => m.type === 'text' || m.type === 'multimodal');
         
         const select = document.getElementById('chat-model-select');
         
-        if (availableModels.length === 0) {
+        if (availableChatModels.length === 0) {
             select.innerHTML = '<option value="">No models available</option>';
             return;
         }
         
-        select.innerHTML = availableModels.map(model => {
+        select.innerHTML = availableChatModels.map(model => {
             const statusIcon = model.status === 'loaded' ? '✓' : model.status === 'loading' ? '⏳' : '○';
-            return `<option value="${model.name}">${statusIcon} ${model.name}</option>`;
+            const visionIcon = model.type === 'multimodal' ? ' 👁️' : '';
+            return `<option value="${model.name}">${statusIcon} ${model.name}${visionIcon}</option>`;
         }).join('');
         
         // Try to maintain current selection or select first loaded model
-        const loadedModels = availableModels.filter(m => m.status === 'loaded');
+        const loadedModels = availableChatModels.filter(m => m.status === 'loaded');
         if (loadedModels.length > 0 && !select.value) {
             select.value = loadedModels[0].name;
         }
@@ -552,6 +622,7 @@ async function loadChatModels() {
     } catch (error) {
         console.error('Failed to load chat models:', error);
         document.getElementById('chat-model-select').innerHTML = '<option value="">Error loading models</option>';
+        availableChatModels = [];
     }
 }
 
@@ -581,15 +652,35 @@ function updateChatInputState() {
     const model = document.getElementById('chat-model-select').value;
     const chatInput = document.getElementById('chat-input');
     const sendBtn = document.getElementById('send-chat-btn');
+    const imageUploadBtn = document.getElementById('image-upload-btn');
+    
+    // Find the selected model to check if it supports vision
+    const selectedModel = availableChatModels.find(m => m.name === model);
+    const supportsVision = selectedModel && selectedModel.type === 'multimodal';
     
     if (model && currentChatSession) {
         chatInput.disabled = false;
         sendBtn.disabled = false;
-        chatInput.placeholder = 'Type your message...';
+        chatInput.placeholder = supportsVision ? 'Type your message or attach images...' : 'Type your message...';
+        
+        // Show/hide image upload button based on vision support
+        if (supportsVision) {
+            imageUploadBtn.classList.remove('hidden');
+            imageUploadBtn.disabled = false;
+        } else {
+            imageUploadBtn.classList.add('hidden');
+            imageUploadBtn.disabled = true;
+            // Clear any selected images when switching to non-vision model
+            clearSelectedImages();
+        }
     } else {
         chatInput.disabled = true;
         sendBtn.disabled = true;
+        imageUploadBtn.disabled = true;
+        imageUploadBtn.classList.add('hidden');
         chatInput.placeholder = currentChatSession ? 'Select a model to start chatting...' : 'Create or select a chat session first...';
+        // Clear any selected images when no model is selected
+        clearSelectedImages();
     }
 }
 
@@ -616,7 +707,11 @@ async function initializeChatTab() {
     await loadChatSessions();
     
     // Add event listeners
-    document.getElementById('chat-model-select').addEventListener('change', updateChatInputState);
+    document.getElementById('chat-model-select').addEventListener('change', () => {
+        updateChatInputState();
+        // Also call updateChatInputState again to properly handle vision model UI updates
+        setTimeout(updateChatInputState, 50);
+    });
     document.getElementById('chat-rag-select').addEventListener('change', () => {
         // Update current session RAG collection preference
         if (currentChatSession) {
@@ -641,6 +736,133 @@ function sendMessage() {
     sendChatMessage();
 }
 
+// Global variables for image upload
+let selectedImages = [];
+const MAX_IMAGES = 5;
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+
+// Trigger image file selection
+function triggerImageUpload() {
+    const imageInput = document.getElementById('image-input');
+    imageInput.click();
+}
+
+// Handle image file selection
+function handleImageSelection(event) {
+    const files = Array.from(event.target.files);
+    
+    for (const file of files) {
+        // Validate file type
+        if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+            showToast(`Invalid file type: ${file.name}. Only JPEG, PNG, GIF, and WebP are supported.`, 'error');
+            continue;
+        }
+        
+        // Validate file size
+        if (file.size > MAX_IMAGE_SIZE) {
+            showToast(`File too large: ${file.name}. Maximum size is 10MB.`, 'error');
+            continue;
+        }
+        
+        // Check if we've reached the maximum number of images
+        if (selectedImages.length >= MAX_IMAGES) {
+            showToast(`Maximum ${MAX_IMAGES} images allowed.`, 'error');
+            break;
+        }
+        
+        // Check if image is already selected
+        if (selectedImages.some(img => img.name === file.name && img.size === file.size)) {
+            showToast(`Image already selected: ${file.name}`, 'warning');
+            continue;
+        }
+        
+        // Add the image to the selected list
+        const imageData = {
+            file: file,
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            id: Date.now() + Math.random() // Unique identifier
+        };
+        
+        selectedImages.push(imageData);
+    }
+    
+    // Clear the input so the same file can be selected again if needed
+    event.target.value = '';
+    
+    // Update the preview
+    updateImagePreview();
+}
+
+// Update image preview display
+function updateImagePreview() {
+    const container = document.getElementById('image-preview-container');
+    const previewsContainer = document.getElementById('image-previews');
+    
+    if (selectedImages.length === 0) {
+        container.classList.add('hidden');
+        previewsContainer.innerHTML = '';
+        return;
+    }
+    
+    container.classList.remove('hidden');
+    
+    previewsContainer.innerHTML = selectedImages.map(imageData => {
+        const sizeText = formatFileSize(imageData.size);
+        return `
+            <div class="relative bg-gray-700 rounded-lg p-2 flex items-center space-x-2 max-w-xs">
+                <div class="flex-shrink-0">
+                    <img id="preview-${imageData.id}" src="" alt="${imageData.name}" 
+                        class="w-12 h-12 object-cover rounded border border-gray-600">
+                </div>
+                <div class="flex-1 min-w-0">
+                    <div class="text-white text-sm truncate">${imageData.name}</div>
+                    <div class="text-gray-400 text-xs">${sizeText}</div>
+                </div>
+                <button onclick="removeImage('${imageData.id}')" 
+                    class="flex-shrink-0 text-gray-400 hover:text-red-400 p-1">
+                    <i class="fas fa-times text-xs"></i>
+                </button>
+            </div>
+        `;
+    }).join('');
+    
+    // Load image previews
+    selectedImages.forEach(imageData => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = document.getElementById(`preview-${imageData.id}`);
+            if (img) {
+                img.src = e.target.result;
+            }
+        };
+        reader.readAsDataURL(imageData.file);
+    });
+}
+
+// Remove an image from the selection
+function removeImage(imageId) {
+    selectedImages = selectedImages.filter(img => img.id != imageId);
+    updateImagePreview();
+}
+
+// Clear all selected images
+function clearSelectedImages() {
+    selectedImages = [];
+    updateImagePreview();
+}
+
+// Format file size for display
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 // Export functions for global use
 window.loadChatSessions = loadChatSessions;
 window.newChatSession = newChatSession;
@@ -656,3 +878,7 @@ window.loadChatRagCollections = loadChatRagCollections;
 window.initializeChatTab = initializeChatTab;
 window.newChat = newChat;
 window.sendMessage = sendMessage;
+window.triggerImageUpload = triggerImageUpload;
+window.handleImageSelection = handleImageSelection;
+window.removeImage = removeImage;
+window.clearSelectedImages = clearSelectedImages;
