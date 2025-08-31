@@ -291,9 +291,9 @@ def _format_chat_prompt(messages: List[ChatCompletionMessage]) -> tuple[List[Dic
                 all_images.append(img)
                 logger.debug(f"Found image in message.images array: {img[:50]}{'...' if len(img) > 50 else ''}")
 
-    logger.error(f"🔧 Image collection complete: {len(all_images)} images found")
+            logger.debug(f"🔧 Image collection complete: {len(all_images)} images found")
     for i, img in enumerate(all_images):
-        logger.error(f"🔧 Collected image {i+1}: {img[:100]}{'...' if len(img) > 100 else ''}")
+        logger.debug(f"🔧 Collected image {i+1}: {img[:100]}{'...' if len(img) > 100 else ''}")
 
     return chat_messages, all_images
 
@@ -1977,6 +1977,20 @@ def create_app() -> FastAPI:
                         detail=f"Model '{request.model}' failed to load properly"
                     )
 
+            # Check if tools are provided
+            has_tools = request.tools is not None and len(request.tools) > 0
+            tool_executor = None
+            
+            # Initialize tool executor if tools are requested
+            if has_tools:
+                # Try to get the active RAG collection for tool execution
+                active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
+                if active_collection:
+                    tool_executor = get_tool_executor(active_collection.path)
+                    logger.info(f"Tool executor initialized with collection path: {active_collection.path}")
+                else:
+                    logger.warning("Tools requested but no active RAG collection found")
+
             # Add default system prompt if none provided
             messages = request.messages
             has_system_message = any(msg.role == "system" for msg in messages)
@@ -1986,15 +2000,24 @@ def create_app() -> FastAPI:
 
             # Only add system message if no system message exists AND no images (vision models don't handle system messages well)
             if not has_system_message and not images:
-                # Add a helpful default system message for non-vision models
-                default_system = ChatCompletionMessage(
-                    role="system",
-                    content="You are a helpful AI assistant. Provide clear, accurate, and concise responses."
-                )
+                if has_tools and tool_executor and tool_executor.has_available_tools():
+                    # Create system prompt with tool instructions
+                    tools_list = [tool.model_dump() for tool in request.tools]
+                    system_content = _create_system_prompt_with_tools(tools_list)
+                    default_system = ChatCompletionMessage(
+                        role="system",
+                        content=system_content
+                    )
+                else:
+                    # Add a helpful default system message for non-vision models
+                    default_system = ChatCompletionMessage(
+                        role="system",
+                        content="You are a helpful AI assistant. Provide clear, accurate, and concise responses."
+                    )
                 messages = [default_system] + list(messages)
                 # Re-extract after adding system message
                 chat_messages, images = _format_chat_prompt(messages)
-            logger.error(f"🔧 After _format_chat_prompt: {len(images)} images extracted")
+            logger.debug(f"🔧 After _format_chat_prompt: {len(images)} images extracted")
 
             # Enforce server-side maximum token limit
             MAX_TOKENS_LIMIT = 16384  # 16k max
@@ -2026,10 +2049,10 @@ def create_app() -> FastAPI:
             is_vision_model = False
             if loaded_model and hasattr(loaded_model.mlx_wrapper, 'model_type') and loaded_model.mlx_wrapper.model_type == "vision":
                 is_vision_model = True
-            logger.error(f"🔧 Vision model check: is_vision_model={is_vision_model}, model_type={getattr(loaded_model.mlx_wrapper, 'model_type', 'unknown') if loaded_model else 'no_model'}")
+            logger.debug(f"🔧 Vision model check: is_vision_model={is_vision_model}, model_type={getattr(loaded_model.mlx_wrapper, 'model_type', 'unknown') if loaded_model else 'no_model'}")
 
             # Handle streaming vs non-streaming
-            logger.error(f"🔧 Request stream setting: {request.stream}")
+            logger.debug(f"🔧 Request stream setting: {request.stream}")
 
             # Check if we need to handle vision models with images in streaming
             force_vision_streaming = False
@@ -2194,6 +2217,43 @@ def create_app() -> FastAPI:
                         detail="Generation failed and returned no result."
                     )
 
+                # Check for tool calls in the response if tools are available
+                tool_calls = None
+                finish_reason = "stop"
+                
+                if has_tools and tool_executor and tool_executor.has_available_tools():
+                    # Parse tool calls from the LLM response
+                    detected_tool_calls = _parse_tool_calls_from_text(result.text)
+                    
+                    if detected_tool_calls:
+                        logger.info(f"Detected {len(detected_tool_calls)} tool calls in response")
+                        tool_calls = detected_tool_calls
+                        finish_reason = "tool_calls"
+                        
+                        # Execute tool calls
+                        tool_results = await tool_executor.execute_tool_calls(detected_tool_calls)
+                        
+                        # For now, we'll return the tool calls and let the client handle the next round
+                        # In a full implementation, we'd continue the conversation with tool results
+                        logger.info(f"Executed {len(tool_results)} tool calls")
+
+                # Build the response message
+                response_message = ChatCompletionMessage(
+                    role="assistant",
+                    content=result.text if finish_reason == "stop" else None
+                )
+                
+                # Add tool calls to the message if any were detected
+                if tool_calls:
+                    response_message.tool_calls = [
+                        ToolCall(
+                            id=call["id"],
+                            type=call["type"],
+                            function=call["function"]
+                        )
+                        for call in tool_calls
+                    ]
+
                 response = ChatCompletionResponse(
                     id=completion_id,
                     created=created_time,
@@ -2201,11 +2261,8 @@ def create_app() -> FastAPI:
                     choices=[
                         ChatCompletionChoice(
                             index=0,
-                            message=ChatCompletionMessage(
-                                role="assistant",
-                                content=result.text
-                            ),
-                            finish_reason="stop"
+                            message=response_message,
+                            finish_reason=finish_reason
                         )
                     ],
                     usage=ChatCompletionUsage(
@@ -2874,6 +2931,41 @@ def create_app() -> FastAPI:
         asyncio.get_event_loop().call_later(1.0, restart)
 
         return {"message": "Server restarting with updated settings"}
+
+    @app.get("/v1/tools")
+    async def get_available_tools(db: Session = Depends(get_db_session)):
+        """Get available tools for the active RAG collection."""
+        try:
+            # Try to get the active RAG collection for tool execution
+            active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
+            if not active_collection:
+                return {
+                    "tools": [],
+                    "message": "No active RAG collection. Activate a collection to enable tools."
+                }
+            
+            tool_executor = get_tool_executor(active_collection.path)
+            if not tool_executor.has_available_tools():
+                return {
+                    "tools": [],
+                    "message": f"No tools available for collection path: {active_collection.path}"
+                }
+            
+            tools = tool_executor.get_tools_for_openai_request()
+            
+            return {
+                "tools": tools,
+                "collection_name": active_collection.name,
+                "collection_path": active_collection.path,
+                "tool_count": len(tools)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting available tools: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error getting tools: {str(e)}"
+            )
 
     @app.get("/v1/tools/prompt/demo")
     async def demo_tool_prompts(

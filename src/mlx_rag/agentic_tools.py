@@ -126,6 +126,39 @@ class AgenticTool(ABC):
         elif expected_type == "object":
             return isinstance(value, dict)
         return True
+    
+    def get_openai_function_definition(self) -> Dict[str, Any]:
+        """Convert tool definition to OpenAI function definition format."""
+        definition = self.definition
+        
+        # Build properties and required parameters
+        properties = {}
+        required = []
+        
+        for param in definition.parameters:
+            param_def = {
+                "type": param.type,
+                "description": param.description
+            }
+            
+            # Add enum values if present
+            if hasattr(param, 'enum') and param.enum:
+                param_def["enum"] = param.enum
+            
+            properties[param.name] = param_def
+            
+            if param.required:
+                required.append(param.name)
+        
+        return {
+            "name": definition.name,
+            "description": definition.description,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": required
+            }
+        }
 
 
 class FileSystemTool(AgenticTool):

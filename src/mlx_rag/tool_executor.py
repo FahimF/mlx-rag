@@ -175,17 +175,18 @@ class ToolExecutor:
             logger.info(f"Executing tool call {tool_call_id}: {function_name} with args {arguments}")
             
             # Execute the tool
-            result = await tool.execute_async(arguments)
+            tool_result = await tool.execute(**arguments)
             
             execution_time = (asyncio.get_event_loop().time() - start_time) * 1000
             
-            logger.info(f"Tool call {tool_call_id} completed successfully in {execution_time:.1f}ms")
+            logger.info(f"Tool call {tool_call_id} completed in {execution_time:.1f}ms")
             
             return ToolExecutionResult(
                 tool_call_id=tool_call_id,
                 function_name=function_name,
-                success=True,
-                result=result,
+                success=tool_result.success,
+                result=tool_result.result,
+                error=tool_result.error,
                 execution_time_ms=execution_time
             )
             
