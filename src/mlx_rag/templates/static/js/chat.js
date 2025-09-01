@@ -56,8 +56,7 @@ async function loadChatSession(sessionId) {
     try {
         const response = await apiCall(`/v1/chat/sessions/${sessionId}`);
         currentChatSession = response;
-        currentChatMessages = response.messages || [];
-        
+        currentChatMessages = response.messages || [];        
         // Update UI
         document.getElementById('current-chat-title').textContent = response.title;
         document.getElementById('edit-title-btn').classList.remove('hidden');
@@ -80,28 +79,39 @@ async function loadChatSession(sessionId) {
         chatInput.placeholder = 'Type your message...';
         
         // Hide placeholder and render messages
-        document.getElementById('no-chat-placeholder').style.display = 'none';
+        const placeholder = document.getElementById('no-chat-placeholder');
+        if (placeholder) {
+            placeholder.style.display = 'none';
+        }
         renderChatMessages();
         
         // Ensure we scroll to bottom after loading the chat session
         setTimeout(() => {
             const container = document.getElementById('chat-messages');
-            container.scrollTop = container.scrollHeight;
+            if (container) {
+                container.scrollTop = container.scrollHeight;
+            }
         }, 150);
         
-        // Update session list selection
-        updateSessionSelection(sessionId);
+        // Update session list selection (with small delay to ensure DOM is ready)
+        setTimeout(() => {
+            updateSessionSelection(sessionId);
+        }, 50);
         
     } catch (error) {
-        console.error('Failed to load chat session:', error);
+        console.error(`[CHAT] Error in loadChatSession for sessionId ${sessionId}:`, error);
+        console.error(`[CHAT] Error details:`, {
+            message: error.message,
+            stack: error.stack,
+            name: error.name
+        });
         showToast('Failed to load chat session', 'error');
     }
 }
 
 // Render chat sessions in sidebar
 function renderChatSessions() {
-    const container = document.getElementById('chat-sessions-list');
-    
+    const container = document.getElementById('chat-sessions-list');    
     if (chatSessions.length === 0) {
         container.innerHTML = `
             <div class="text-center text-gray-500 py-8">
@@ -123,7 +133,8 @@ function renderChatSessions() {
             <div class="chat-session-item p-3 rounded-lg cursor-pointer transition-colors mb-2 ${
                 isActive ? 'bg-blue-600 border-blue-400' : 'bg-gray-700 hover:bg-gray-600'
             }" 
-                 onclick="loadChatSession('${session.session_id}')">
+                 data-session-id="${session.session_id}"
+                 onclick="console.log('[CHAT] Session clicked:', '${session.session_id}'); loadChatSession('${session.session_id}')">
                 <div class="flex items-start justify-between">
                     <div class="flex-1 min-w-0">
                         <h4 class="text-white font-medium text-sm truncate">${escapeHtml(session.title)}</h4>
@@ -151,15 +162,19 @@ function renderChatSessions() {
 
 // Update session selection in sidebar
 function updateSessionSelection(sessionId) {
+    // Remove active state from all session items
     document.querySelectorAll('.chat-session-item').forEach(item => {
         item.classList.remove('bg-blue-600', 'border-blue-400');
         item.classList.add('bg-gray-700', 'hover:bg-gray-600');
     });
     
-    const activeItem = document.querySelector(`[onclick*="${sessionId}"]`);
+    // Find and activate the selected session using data attribute
+    const activeItem = document.querySelector(`[data-session-id="${sessionId}"]`);
     if (activeItem) {
         activeItem.classList.remove('bg-gray-700', 'hover:bg-gray-600');
         activeItem.classList.add('bg-blue-600', 'border-blue-400');
+    } else {
+        console.warn(`Could not find session element with ID: ${sessionId}`);
     }
 }
 
@@ -578,7 +593,10 @@ async function deleteChatSession() {
         document.getElementById('edit-title-btn').classList.add('hidden');
         document.getElementById('delete-chat-btn').classList.add('hidden');
         document.getElementById('scroll-to-bottom-btn').classList.add('hidden');
-        document.getElementById('no-chat-placeholder').style.display = 'block';
+        const placeholder = document.getElementById('no-chat-placeholder');
+        if (placeholder) {
+            placeholder.style.display = 'block';
+        }
         document.getElementById('chat-messages').innerHTML = `
             <div class="text-center text-gray-500 py-8" id="no-chat-placeholder">
                 <i class="fas fa-comments text-4xl mb-4"></i>
@@ -631,7 +649,10 @@ async function deleteSession(sessionId) {
             document.getElementById('edit-title-btn').classList.add('hidden');
             document.getElementById('delete-chat-btn').classList.add('hidden');
             document.getElementById('scroll-to-bottom-btn').classList.add('hidden');
-            document.getElementById('no-chat-placeholder').style.display = 'block';
+            const placeholder = document.getElementById('no-chat-placeholder');
+            if (placeholder) {
+                placeholder.style.display = 'block';
+            }
             document.getElementById('chat-messages').innerHTML = `
                 <div class="text-center text-gray-500 py-8" id="no-chat-placeholder">
                     <i class="fas fa-comments text-4xl mb-4"></i>

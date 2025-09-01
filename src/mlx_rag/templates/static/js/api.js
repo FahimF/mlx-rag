@@ -15,12 +15,20 @@ async function apiCall(endpoint, options = {}) {
         });
 
         if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`[API] Error response body:`, errorText);
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
-        return await response.json();
+        const jsonResponse = await response.json();
+        return jsonResponse;
     } catch (error) {
-        console.error('API call failed:', error);
+        console.error(`[API] API call failed for ${endpoint}:`, error);
+        console.error(`[API] Error details:`, {
+            message: error.message,
+            stack: error.stack,
+            name: error.name
+        });
         showToast(`API Error: ${error.message}`, 'error');
         throw error;
     }

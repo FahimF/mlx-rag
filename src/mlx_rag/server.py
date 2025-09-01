@@ -873,23 +873,23 @@ def create_app() -> FastAPI:
     async def list_chat_sessions(db: Session = Depends(get_db_session)):
         """List all chat sessions ordered by last message time."""
         try:
-            sessions = db.query(ChatSession).order_by(ChatSession.last_message_at.desc().nullslast(), ChatSession.updated_at.desc()).all()
-            return {
-                "sessions": [
-                    {
-                        "session_id": session.session_id,
-                        "title": session.get_display_title(),
-                        "created_at": session.created_at.isoformat() if session.created_at else None,
-                        "updated_at": session.updated_at.isoformat() if session.updated_at else None,
-                        "last_message_at": session.last_message_at.isoformat() if session.last_message_at else None,
-                        "message_count": session.message_count,
-                        "model_name": session.model_name,
-                        "rag_collection_name": session.rag_collection_name
-                    }
-                    for session in sessions
-                ]
-            }
+            sessions = db.query(ChatSession).order_by(ChatSession.last_message_at.desc().nullslast(), ChatSession.updated_at.desc()).all()            
+            sessions_data = [
+                {
+                    "session_id": session.session_id,
+                    "title": session.get_display_title(),
+                    "created_at": session.created_at.isoformat() if session.created_at else None,
+                    "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+                    "last_message_at": session.last_message_at.isoformat() if session.last_message_at else None,
+                    "message_count": session.message_count,
+                    "model_name": session.model_name,
+                    "rag_collection_name": session.rag_collection_name
+                }
+                for session in sessions
+            ]
+            return {"sessions": sessions_data}
         except Exception as e:
+            print(f"[BACKEND] Error listing chat sessions: {e}")
             logger.error(f"Error listing chat sessions: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -946,13 +946,12 @@ def create_app() -> FastAPI:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Chat session '{session_id}' not found"
-                )
-            
+                )            
             messages = db.query(ChatMessage).filter(
                 ChatMessage.session_id == session_id
             ).order_by(ChatMessage.created_at.asc()).all()
             
-            return {
+            session_data = {
                 "session_id": session.session_id,
                 "title": session.title,
                 "created_at": session.created_at.isoformat() if session.created_at else None,
@@ -974,9 +973,12 @@ def create_app() -> FastAPI:
                     for msg in messages
                 ]
             }
+            return session_data
         except HTTPException:
+            print(f"[BACKEND] HTTPException in get_chat_session for {session_id}")
             raise
         except Exception as e:
+            print(f"[BACKEND] Exception in get_chat_session for {session_id}: {e}")
             logger.error(f"Error getting chat session {session_id}: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
