@@ -148,25 +148,32 @@ TOOL_TEMPLATES = {
     },
     
     "edit_file": {
-        "description": "Modify existing files by searching for specific content and replacing it",
+        "description": "Modify existing files by replacing specific line ranges with new content",
         "when_to_use": [
             "Fixing bugs in existing code",
             "Adding new functionality to existing files",
             "Updating configuration values",
-            "Refactoring code"
+            "Refactoring code",
+            "Making targeted modifications to specific sections"
         ],
         "best_practices": [
-            "Always read the file first to understand current state",
+            "Always read the file first to understand current state and line numbers",
             "Make targeted, specific changes rather than large rewrites",
-            "Ensure search text is unique enough to avoid wrong matches",
+            "Use line numbers accurately (1-based indexing)",
             "Consider the impact of changes on the rest of the codebase",
-            "Test changes when possible"
+            "Test changes when possible",
+            "Be precise with start and end line numbers"
         ],
         "examples": [
             {
-                "scenario": "Fixing a bug in a function",
-                "call": {"function": "edit_file", "arguments": {"path": "utils.py", "search": "    return x + y", "replace": "    return x * y"}},
-                "explanation": "Fix a calculation error by changing addition to multiplication"
+                "scenario": "Replacing a function implementation",
+                "call": {"function": "edit_file", "arguments": {"path": "utils.py", "start_line": 15, "end_line": 18, "new_content": "def calculate_total(x, y):\n    # Fixed calculation\n    return x * y\n"}},
+                "explanation": "Replace lines 15-18 with corrected function implementation"
+            },
+            {
+                "scenario": "Adding new import at the top",
+                "call": {"function": "edit_file", "arguments": {"path": "main.py", "start_line": 1, "end_line": 1, "new_content": "import os\nimport sys\n"}},
+                "explanation": "Insert new imports at the beginning of the file"
             }
         ]
     }

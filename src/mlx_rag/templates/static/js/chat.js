@@ -351,7 +351,21 @@ async function sendChatMessage() {
     currentChatMessages.push(assistantMessage);
     renderChatMessages();
     
+    // Disable input and send button during processing
+    const chatInput = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('send-chat-btn');
+    const imageUploadBtn = document.getElementById('image-upload-btn');
+    
+    chatInput.disabled = true;
+    sendBtn.disabled = true;
+    imageUploadBtn.disabled = true;
+    chatInput.placeholder = 'Processing your message...';
+    
     try {
+        // Show processing indicator
+        assistantMessage.content = '🤔 Thinking...';
+        renderChatMessages();
+        
         // Convert images to base64 data URLs for OpenAI endpoint
         const processedImages = await Promise.all(
             imagesToSend.map(imageData => {
@@ -364,8 +378,47 @@ async function sendChatMessage() {
             })
         );
         
+        // Get available tools for the active RAG collection first
+        let availableTools = [];
+        try {
+            const toolsResponse = await apiCall('/v1/tools');
+            if (toolsResponse.tools && toolsResponse.tools.length > 0) {
+                availableTools = toolsResponse.tools;
+                console.log(`Found ${availableTools.length} available tools for RAG collection`);
+            }
+        } catch (error) {
+            console.log('No tools available or error fetching tools:', error);
+        }
+        
         // Build messages array for OpenAI format
         const messages = [];
+        
+        // Add system message with RAG and tools instructions
+        if (ragCollection || availableTools.length > 0) {
+            let systemContent = '';
+            
+            if (ragCollection) {
+                systemContent += `You have access to a RAG collection named "${ragCollection}" containing source code and documentation. `;
+            }
+            
+            if (availableTools.length > 0) {
+                systemContent += `You have access to the following tools to interact with the codebase:
+`;
+                availableTools.forEach(tool => {
+                    systemContent += `- ${tool.function.name}: ${tool.function.description}
+`;
+                });
+                systemContent += `
+IMPORTANT: When a user asks about modifying, reading, or working with files, you MUST use the appropriate tools (like read_file, search_files, list_directory, etc.) to examine the codebase first, then provide specific solutions. Do not make assumptions about code you haven't seen.`;
+            }
+            
+            if (systemContent) {
+                messages.push({
+                    role: 'system',
+                    content: systemContent.trim()
+                });
+            }
+        }
         
         // Add chat history
         currentChatMessages.slice(0, -1).forEach(msg => {
@@ -400,18 +453,6 @@ async function sendChatMessage() {
             content: userMessageContent
         });
         
-        // Get available tools for the active RAG collection
-        let availableTools = [];
-        try {
-            const toolsResponse = await apiCall('/v1/tools');
-            if (toolsResponse.tools && toolsResponse.tools.length > 0) {
-                availableTools = toolsResponse.tools;
-                console.log(`Found ${availableTools.length} available tools for RAG collection`);
-            }
-        } catch (error) {
-            console.log('No tools available or error fetching tools:', error);
-        }
-        
         // Prepare OpenAI chat completion request (always non-streaming)
         const requestBody = {
             model: model,
@@ -425,15 +466,6 @@ async function sendChatMessage() {
         if (availableTools.length > 0) {
             requestBody.tools = availableTools;
             requestBody.tool_choice = 'auto';
-        }
-        
-        // Add RAG collection context by adding a system message
-        if (ragCollection) {
-            // Insert system message at the beginning to include RAG context instruction
-            messages.unshift({
-                role: 'system',
-                content: `You have access to a RAG collection named "${ragCollection}". Use the context from this collection to provide more accurate and detailed responses when relevant.`
-            });
         }
         
         console.log('=== OPENAI REQUEST DEBUG ===');
@@ -607,9 +639,16 @@ async function sendChatMessage() {
             }
         }
         
-        // Mark streaming as complete
+        // Mark streaming as complete and update final content
+        assistantMessage.content = fullResponse || 'No response received';
         assistantMessage.isStreaming = false;
         renderChatMessages();
+        
+        // Re-enable input and send button
+        chatInput.disabled = false;
+        sendBtn.disabled = false;
+        imageUploadBtn.disabled = false;
+        updateChatInputState(); // This will set proper placeholder and button states
         
         // Save assistant message to server
         try {
@@ -638,9 +677,15 @@ async function sendChatMessage() {
         showToast('Failed to get response from model', 'error');
         
         // Update assistant message with error
-        assistantMessage.content = `Error: ${error.message}`;
+        assistantMessage.content = `❌ Error: ${error.message}`;
         assistantMessage.isStreaming = false;
         renderChatMessages();
+        
+        // Re-enable input and send button on error
+        chatInput.disabled = false;
+        sendBtn.disabled = false;
+        imageUploadBtn.disabled = false;
+        updateChatInputState(); // This will set proper placeholder and button states
     }
 }
 

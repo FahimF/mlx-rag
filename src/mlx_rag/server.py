@@ -531,6 +531,7 @@ def _parse_tool_calls_from_text(text: str) -> List[Dict[str, Any]]:
     - JSON function calls
     - XML-style tool tags
     - Structured tool call patterns
+    - Reasoning-based tool intentions (for models that use <think> tags)
     """
     tool_calls = []
     
@@ -611,6 +612,61 @@ def _parse_tool_calls_from_text(text: str) -> List[Dict[str, Any]]:
             except json.JSONDecodeError:
                 logger.warning(f"Failed to parse function arguments: {arguments_str}")
     
+    # Pattern 4: Natural language tool detection
+    # Look for common phrases that indicate tool usage
+    if not tool_calls:
+        # Look for phrases like "let me explore", "I need to find", "First, let me list", etc.
+        natural_patterns = [
+            (r'(?:let me|I need to|I will|I should|First,? let me)\s+(?:explore|list|check)\s+(?:the\s+)?(?:directory|folder)(?:\s+structure)?', 'list_directory', '.'),
+            (r'(?:let me|I need to|I will|I should|First,? let me)\s+(?:find|locate|search for)\s+(?:the\s+)?(?:main\.dart|[\w\.]+\.dart|file)', 'search_files', 'main.dart'),
+            (r'(?:let me|I need to|I will|I should|First,? let me)\s+(?:read|examine|look at|check)\s+(?:the\s+)?(?:main\.dart|[\w\.]+\.dart|file)', 'read_file', 'main.dart'),
+            (r'(?:explore|list|check)\s+(?:the\s+)?(?:directory|folder)(?:\s+structure)?', 'list_directory', '.'),
+            (r'(?:find|locate|search for)\s+(?:the\s+)?(?:main\.dart|[\w\.]+\.dart)', 'search_files', 'main.dart'),
+            (r'(?:read|examine|look at|check)\s+(?:the\s+)?(?:main\.dart|[\w\.]+\.dart)', 'read_file', 'main.dart')
+        ]
+        
+        for pattern, tool_name, default_arg in natural_patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                # Create appropriate arguments based on the tool
+                if tool_name == 'list_directory':
+                    arguments = {"path": "."}
+                elif tool_name == 'search_files':
+                    # Try to extract filename from the match or use default
+                    filename = default_arg
+                    match_text = match.group(0).lower()
+                    # Look for specific filenames in the match
+                    file_match = re.search(r'([\w\-\.]+\.(?:dart|py|js|ts|java|cpp|c|h|json|yaml|yml|xml|html|css|md|txt))', match_text)
+                    if file_match:
+                        filename = file_match.group(1)
+                    arguments = {"query": filename, "path": "."}
+                elif tool_name == 'read_file':
+                    # Try to extract filename from the match or use default
+                    filename = default_arg
+                    match_text = match.group(0).lower()
+                    file_match = re.search(r'([\w\-\.]+\.(?:dart|py|js|ts|java|cpp|c|h|json|yaml|yml|xml|html|css|md|txt))', match_text)
+                    if file_match:
+                        filename = file_match.group(1)
+                    arguments = {"path": filename}
+                else:
+                    continue
+                
+                tool_call = {
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "arguments": json.dumps(arguments)
+                    }
+                }
+                tool_calls.append(tool_call)
+                logger.info(f"Inferred tool call from natural language: {tool_name} with {arguments}")
+                break  # Only create one tool call per natural language detection
+        
+        # If still no tools found, try the more complex reasoning extraction
+        if not tool_calls:
+            tool_calls.extend(_extract_tool_intentions_from_reasoning(text, known_tools))
+    
     # Remove duplicates based on function name and arguments
     seen = set()
     unique_tool_calls = []
@@ -624,6 +680,119 @@ def _parse_tool_calls_from_text(text: str) -> List[Dict[str, Any]]:
         logger.info(f"Detected {len(unique_tool_calls)} tool calls in LLM response")
     
     return unique_tool_calls
+
+
+def _extract_tool_intentions_from_reasoning(text: str, known_tools: set) -> List[Dict[str, Any]]:
+    """Extract tool intentions from model reasoning when explicit tool calls aren't present.
+    
+    This handles models like GLM and DeepSeek that use <think> tags for reasoning
+    but don't output standard OpenAI tool call formats.
+    """
+    tool_calls = []
+    
+    # Extract content from <think> tags first
+    think_pattern = r'<think>(.*?)</think>'
+    think_matches = re.findall(think_pattern, text, re.IGNORECASE | re.DOTALL)
+    
+    reasoning_text = text
+    if think_matches:
+        # Combine all thinking content
+        reasoning_text = ' '.join(think_matches) + ' ' + text
+        logger.debug(f"Found {len(think_matches)} <think> sections to analyze")
+    
+    # Look for tool usage intentions in the reasoning
+    tool_intention_patterns = [
+        # "I need to use read_file to read main.dart"
+        r'(?:need to|should|will|let me|going to)\s+(?:use\s+)?(?:the\s+)?(\w+)\s+(?:tool\s+)?(?:to\s+)?(?:read|list|search|write|edit|modify)\s+(?:the\s+)?([^\s\.\,]+)',
+        # "Let me read/edit the main.dart file"
+        r'let me\s+(read|list|search|edit|modify)\s+(?:the\s+)?([^\s\.\,]+)',
+        # "I'll use read_file/edit_file with path main.dart"
+        r"I\'ll\s+use\s+(\w+)(?:\s+with\s+path\s+|\s+to\s+(?:read|edit|modify)\s+|\s+for\s+)([^\s\.\,]+)",
+        # "First, read/modify main.dart"
+        r'(?:first|then|next),?\s+(read|list|search|edit|modify)\s+([^\s\.\,]+)',
+        # "Use read_file/edit_file function to read/modify main.dart"
+        r'use\s+(\w+)(?:\s+function)?\s+to\s+(?:read|list|search|edit|modify)\s+([^\s\.\,]+)',
+        # "I must examine/modify the main.dart file"
+        r'(?:must|need to|should)\s+(?:examine|check|read|modify|edit|update)\s+(?:the\s+)?([^\s\.\,]+)',
+        # Direct mentions of modification without tool names
+        r'(?:modify|edit|change|update)\s+(?:the\s+)?([^\s\.\,]+)\s+(?:file|code)'
+    ]
+    
+    for pattern in tool_intention_patterns:
+        matches = re.finditer(pattern, reasoning_text, re.IGNORECASE)
+        
+        for match in matches:
+            groups = match.groups()
+            if len(groups) >= 2:
+                action_or_tool = groups[0].lower()
+                target = groups[1].strip()
+                
+                # Map actions to tools
+                tool_name = None
+                arguments = {}
+                
+                if action_or_tool in known_tools:
+                    tool_name = action_or_tool
+                elif action_or_tool == 'read':
+                    tool_name = 'read_file'
+                    arguments = {'path': target}
+                elif action_or_tool == 'list':
+                    tool_name = 'list_directory'
+                    arguments = {'path': target if target not in ['.', 'root', 'directory'] else '.'}
+                elif action_or_tool == 'search':
+                    tool_name = 'search_files'
+                    arguments = {'query': target}
+                elif action_or_tool in ['edit', 'modify']:
+                    # User wants to modify - start by reading the file first
+                    tool_name = 'read_file'
+                    arguments = {'path': target}
+                
+                # Try to extract more specific arguments from context
+                if tool_name and not arguments:
+                    if tool_name == 'read_file':
+                        arguments = {'path': target}
+                    elif tool_name == 'list_directory':
+                        arguments = {'path': target if target not in ['.', 'root', 'directory'] else '.'}
+                    elif tool_name == 'search_files':
+                        arguments = {'query': target, 'path': '.'}
+                
+                if tool_name and arguments:
+                    tool_call = {
+                        "id": f"call_{uuid.uuid4().hex[:8]}",
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "arguments": json.dumps(arguments)
+                        }
+                    }
+                    tool_calls.append(tool_call)
+                    logger.info(f"Inferred tool call from reasoning: {tool_name} with {arguments}")
+    
+    # Special case: if user asks to read specific file and model mentions it
+    if not tool_calls:
+        # Look for file names in the text (common patterns)
+        file_patterns = [
+            r'(\w+\.\w+)',  # filename.extension
+            r'([\w\/\-\.]+\.(?:py|js|ts|dart|java|cpp|c|h|json|yaml|yml|xml|html|css|md|txt|cfg|conf))',  # various file extensions
+        ]
+        
+        for pattern in file_patterns:
+            file_matches = re.findall(pattern, text, re.IGNORECASE)
+            for filename in file_matches[:1]:  # Only take first match to avoid spam
+                if len(filename) > 2:  # Avoid very short matches
+                    tool_call = {
+                        "id": f"call_{uuid.uuid4().hex[:8]}",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": json.dumps({"path": filename})
+                        }
+                    }
+                    tool_calls.append(tool_call)
+                    logger.info(f"Inferred file read from context: {filename}")
+                    break
+    
+    return tool_calls
 
 
 def _check_model_supports_tools(model_path: str, model_name: str = None) -> bool:
@@ -797,7 +966,36 @@ def _create_system_prompt_with_tools(
     if user_query:
         return generate_contextual_prompt(tools, user_query, conversation_history)
     else:
-        return generate_tool_system_prompt(tools, context)
+        base_prompt = generate_tool_system_prompt(tools, context)
+        
+        # Add more directive instructions for tool usage
+        enhanced_prompt = base_prompt + "\n\n" + """
+## Important Tool Usage Instructions
+
+**You MUST use the available tools to complete user requests.** Do not attempt to answer questions about files, code, or project structure without first using the appropriate tools to gather information.
+
+**When you decide to use a tool:**
+1. Think about which tool is most appropriate for the task
+2. Make the tool call using the exact JSON format specified
+3. Wait for the tool result before proceeding
+4. Use the tool results to provide a comprehensive answer
+
+**Tool Call Format (IMPORTANT):**
+Always use this exact JSON format for tool calls:
+```json
+{"function": "tool_name", "arguments": {"parameter": "value"}}
+```
+
+**Examples of when to use tools:**
+- User asks about files or code → Use `list_directory` and `read_file`
+- User wants to find something → Use `search_files`
+- User wants to modify code → Use `read_file` first, then `edit_file`
+- User asks about project structure → Use `list_directory` with recursive=true
+
+**Remember:** Always use tools proactively. If a user's question requires information about files, code, or project structure, you MUST use the appropriate tools to get that information before responding.
+"""
+        
+        return enhanced_prompt
 
 
 @asynccontextmanager
@@ -1441,6 +1639,9 @@ def create_app() -> FastAPI:
             chunk_count = 0
             last_chunk = ""
             duplicate_count = 0
+            recent_chunks = []  # Keep track of recent chunks for pattern detection
+            accumulated_content = ""  # Track total content length
+            repetition_patterns = set()  # Track repeated patterns
             
             try:
                 # Check if model exists in database
@@ -1568,7 +1769,7 @@ def create_app() -> FastAPI:
                         return
                 else:
                     # For text-only models or no images, use standard text generation
-                    # Construct the prompt
+                    # Construct the prompt with explicit termination guidance
                     prompt = ""
                     if rag_context:
                         prompt += f"Context (relevant code and documentation):\n{rag_context}\n\nPlease use the above context to answer the following question.\n\n"
@@ -1577,7 +1778,7 @@ def create_app() -> FastAPI:
                     for msg in parsed_history:
                         prompt += f"{msg['role']}: {msg['content']}\n"
                     
-                    prompt += f"user: {message}\nassistant:"
+                    prompt += f"user: {message}\nassistant: I'll provide a clear, concise response to your question without unnecessary repetition.\n\n"
 
                     # Generate the response
                     from mlx_rag.mlx_integration import GenerationConfig
@@ -1598,15 +1799,70 @@ def create_app() -> FastAPI:
                             logger.debug(f"🚀 [STREAM] Skipping empty chunk {chunk_count}")
                             continue
                             
-                        # Detect infinite repetition
+                        # Enhanced repetition detection
+                        
+                        # Keep track of recent chunks for pattern detection
+                        if len(recent_chunks) > 50:  # Keep last 50 chunks
+                            recent_chunks.pop(0)
+                        recent_chunks.append(chunk)
+                        accumulated_content += chunk
+                        
+                        # 1. Exact duplicate detection (more aggressive)
                         if chunk == last_chunk:
                             duplicate_count += 1
-                            if duplicate_count > 10:  # More than 10 identical chunks = infinite loop
-                                logger.error(f"🚀 [STREAM] Detected infinite repetition at chunk {chunk_count}, terminating")
+                            if duplicate_count > 5:  # Reduced from 10 to 5
+                                logger.error(f"🚀 [STREAM] Detected exact repetition ({duplicate_count} times) at chunk {chunk_count}, terminating")
                                 break
                         else:
                             duplicate_count = 0
                             last_chunk = chunk
+                        
+                        # 2. Pattern repetition detection
+                        if len(recent_chunks) >= 10:  # Check for patterns in recent chunks
+                            # Look for repeated 3-chunk patterns
+                            recent_str = ''.join(recent_chunks[-9:])  # Last 9 chunks
+                            pattern_3 = ''.join(recent_chunks[-3:])  # Last 3 chunks as pattern
+                            if len(pattern_3.strip()) > 5 and recent_str.count(pattern_3) >= 3:
+                                logger.error(f"🚀 [STREAM] Detected 3-chunk pattern repetition at chunk {chunk_count}: '{pattern_3[:50]}...', terminating")
+                                break
+                            
+                            # Look for repeated 2-chunk patterns
+                            pattern_2 = ''.join(recent_chunks[-2:])  # Last 2 chunks as pattern
+                            if len(pattern_2.strip()) > 3 and recent_str.count(pattern_2) >= 4:
+                                logger.error(f"🚀 [STREAM] Detected 2-chunk pattern repetition at chunk {chunk_count}: '{pattern_2[:30]}...', terminating")
+                                break
+                        
+                        # 3. Content length stagnation detection
+                        if chunk_count % 20 == 0 and chunk_count > 100:  # Check every 20 chunks after 100
+                            content_growth_rate = len(accumulated_content) / chunk_count
+                            if content_growth_rate < 2.0:  # Less than 2 characters per chunk on average
+                                logger.error(f"🚀 [STREAM] Detected content stagnation (growth rate: {content_growth_rate:.2f} chars/chunk) at chunk {chunk_count}, terminating")
+                                break
+                        
+                        # 4. Fuzzy similarity detection for near-identical chunks
+                        if len(recent_chunks) >= 3:
+                            last_3_chunks = recent_chunks[-3:]
+                            if len(set(last_3_chunks)) <= 1:  # All 3 chunks are identical
+                                logger.error(f"🚀 [STREAM] Detected identical chunk sequence at chunk {chunk_count}, terminating")
+                                break
+                            
+                            # Check if chunks are very similar (differ by only 1-2 characters)
+                            similar_chunks = 0
+                            for i in range(len(last_3_chunks)):
+                                for j in range(i+1, len(last_3_chunks)):
+                                    chunk_a, chunk_b = last_3_chunks[i], last_3_chunks[j]
+                                    if len(chunk_a) > 0 and len(chunk_b) > 0:
+                                        # Simple similarity: count character differences
+                                        min_len = min(len(chunk_a), len(chunk_b))
+                                        if min_len > 0:
+                                            diff_count = sum(1 for k in range(min_len) if chunk_a[k] != chunk_b[k])
+                                            diff_ratio = diff_count / min_len
+                                            if diff_ratio < 0.3:  # Less than 30% different
+                                                similar_chunks += 1
+                            
+                            if similar_chunks >= 2:  # At least 2 pairs are very similar
+                                logger.error(f"🚀 [STREAM] Detected similar chunk pattern at chunk {chunk_count}, terminating")
+                                break
                         
                         # Log every 100th chunk for debugging
                         if chunk_count % 100 == 0 or chunk_count <= 10:
