@@ -2144,37 +2144,20 @@ def create_app() -> FastAPI:
                 else:
                     logger.warning("Tools requested but no active RAG collection found")
                     
-            # Auto-execute tools based on user query analysis
+            # Disable auto-execution of tools to allow normal tool calling flow
+            # The intelligent tool executor was interfering with the model's natural tool calling
             tool_results = []
             auto_context = ""
             
             # Get messages from request early for tool analysis
             messages = request.messages
             
-            if intelligent_executor and messages:
-                # Get the last user message for analysis
-                user_messages = [msg for msg in messages if msg.role == "user"]
-                if user_messages:
-                    last_user_message = user_messages[-1]
-                    user_query = ""
-                    
-                    # Extract text content from the message
-                    if isinstance(last_user_message.content, str):
-                        user_query = last_user_message.content
-                    elif isinstance(last_user_message.content, list):
-                        # Extract text from multimodal content
-                        text_parts = [item.text for item in last_user_message.content if hasattr(item, 'text') and item.text]
-                        user_query = " ".join(text_parts)
-                    
-                    if user_query:
-                        logger.info(f"Running intelligent tool analysis for query: {user_query[:100]}...")
-                        tool_results, auto_context = await intelligent_executor.analyze_and_execute_tools(
-                            user_query, 
-                            [msg.model_dump() for msg in messages[:-1]]  # Previous conversation history
-                        )
-                        
-                        if tool_results:
-                            logger.info(f"Auto-executed {len(tool_results)} tools, generated context: {len(auto_context)} chars")
+            # DISABLED: Intelligent tool auto-execution
+            # This was causing tools to be executed before the model could make tool calls,
+            # which interfered with the normal OpenAI tool calling flow.
+            # The model should make tool calls itself, not have them pre-executed.
+            
+            logger.debug(f"Intelligent tool executor disabled - allowing normal tool calling flow")
 
             # Add default system prompt if none provided
             has_system_message = any(msg.role == "system" for msg in messages)
