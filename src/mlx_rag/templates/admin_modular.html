@@ -137,9 +137,17 @@
                 <div id="models-tab" class="tab-content">
                     <div class="flex justify-between items-center mb-6">
                         <h2 class="text-xl font-bold text-white">Installed Models</h2>
-                        <button onclick="refreshModels()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
-                            <i class="fas fa-sync-alt mr-2"></i>Refresh
-                        </button>
+                        <div class="flex space-x-2">
+                            <div class="flex items-center space-x-2">
+                                <label class="text-sm text-gray-300">
+                                    <input type="checkbox" id="filter-tools" class="mr-2" onchange="filterModelsByTools()">
+                                    <i class="fas fa-tools mr-1"></i>Show only tool-enabled
+                                </label>
+                            </div>
+                            <button onclick="refreshModels()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
+                                <i class="fas fa-sync-alt mr-2"></i>Refresh
+                            </button>
+                        </div>
                     </div>
                     <div id="models-list" class="space-y-4">
                         <!-- Models will be loaded here -->

@@ -412,13 +412,13 @@ async function sendChatMessage() {
             console.log('No tools available or error fetching tools:', error);
         }
         
-        // Prepare OpenAI chat completion request
+        // Prepare OpenAI chat completion request (always non-streaming)
         const requestBody = {
             model: model,
             messages: messages,
             max_tokens: 2048,
             temperature: 0.7,
-            stream: true
+            stream: false // Always use non-streaming mode
         };
         
         // Add tools if available
@@ -453,50 +453,157 @@ async function sendChatMessage() {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
-        // Stream the response (OpenAI format)
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
         let fullResponse = '';
         
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+        if (requestBody.stream) {
+            // Handle streaming response (no tools)
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
             
-            const chunk = decoder.decode(value, { stream: true });
-            
-            // Parse Server-Sent Events format
-            const lines = chunk.split('\n');
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const data = line.slice(6); // Remove 'data: ' prefix
-                    
-                    if (data === '[DONE]') {
-                        break;
-                    }
-                    
-                    try {
-                        const parsed = JSON.parse(data);
-                        const choice = parsed.choices?.[0];
-                        if (choice?.delta?.content) {
-                            fullResponse += choice.delta.content;
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const chunk = decoder.decode(value, { stream: true });
+                
+                // Parse Server-Sent Events format
+                const lines = chunk.split('\n');
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6); // Remove 'data: ' prefix
+                        
+                        if (data === '[DONE]') {
+                            break;
+                        }
+                        
+                        try {
+                            const parsed = JSON.parse(data);
+                            const choice = parsed.choices?.[0];
+                            if (choice?.delta?.content) {
+                                fullResponse += choice.delta.content;
+                                
+                                // Update the assistant message
+                                assistantMessage.content = fullResponse;
+                                renderChatMessages();
+                            }
                             
-                            // Update the assistant message
-                            assistantMessage.content = fullResponse;
-                            renderChatMessages();
+                        } catch (parseError) {
+                            // Skip invalid JSON chunks
+                            console.debug('Skipping invalid JSON chunk:', data);
                         }
-                        
-                        // Handle tool calls if present
-                        if (choice?.delta?.tool_calls) {
-                            console.log('Tool calls detected:', choice.delta.tool_calls);
-                            // Note: For now we'll just log tool calls
-                            // Full tool call handling would require more complex state management
-                        }
-                        
-                    } catch (parseError) {
-                        // Skip invalid JSON chunks
-                        console.debug('Skipping invalid JSON chunk:', data);
                     }
                 }
+            }
+        } else {
+            // Handle non-streaming response (with tools)
+            const responseData = await response.json();
+            console.log('=== NON-STREAMING RESPONSE ===');
+            console.log(JSON.stringify(responseData, null, 2));
+            
+            const choice = responseData.choices?.[0];
+            if (!choice) {
+                throw new Error('No response choice received');
+            }
+            
+            // Check if the model wants to use tools
+            if (choice.message?.tool_calls && choice.message.tool_calls.length > 0) {
+                console.log(`Model requested ${choice.message.tool_calls.length} tool calls`);
+                
+                // Show that the assistant is using tools
+                assistantMessage.content = 'Using tools to help with your request...';
+                renderChatMessages();
+                
+                // Execute each tool call
+                const toolResults = [];
+                for (const toolCall of choice.message.tool_calls) {
+                    console.log(`Executing tool: ${toolCall.function.name}`);
+                    
+                    try {
+                        const toolResponse = await fetch('/v1/tools/execute', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                tool_call_id: toolCall.id,
+                                function_name: toolCall.function.name,
+                                arguments: toolCall.function.arguments
+                            })
+                        });
+                        
+                        if (!toolResponse.ok) {
+                            throw new Error(`Tool execution failed: ${toolResponse.statusText}`);
+                        }
+                        
+                        const toolResult = await toolResponse.json();
+                        
+                        // Handle the actual response format from our backend
+                        const resultContent = toolResult.success 
+                            ? (toolResult.result ? JSON.stringify(toolResult.result) : 'Tool executed successfully') 
+                            : (toolResult.error || 'Tool execution failed');
+                            
+                        toolResults.push({
+                            tool_call_id: toolCall.id,
+                            role: 'tool',
+                            content: resultContent
+                        });
+                        
+                        // Update progress message
+                        assistantMessage.content = `Executed ${toolResults.length}/${choice.message.tool_calls.length} tools...`;
+                        renderChatMessages();
+                        
+                    } catch (toolError) {
+                        console.error(`Error executing tool ${toolCall.function.name}:`, toolError);
+                        toolResults.push({
+                            tool_call_id: toolCall.id,
+                            role: 'tool',
+                            content: JSON.stringify({ error: toolError.message })
+                        });
+                    }
+                }
+                
+                // Now continue the conversation with tool results
+                const followUpMessages = [...requestBody.messages];
+                
+                // Add the assistant's tool call message
+                followUpMessages.push({
+                    role: 'assistant',
+                    content: null,
+                    tool_calls: choice.message.tool_calls
+                });
+                
+                // Add tool results
+                followUpMessages.push(...toolResults);
+                
+                // Make another request to get the final response
+                const followUpRequest = {
+                    ...requestBody,
+                    messages: followUpMessages,
+                    tools: undefined, // Remove tools from follow-up request
+                    tool_choice: undefined
+                };
+                
+                assistantMessage.content = 'Processing tool results...';
+                renderChatMessages();
+                
+                const followUpResponse = await fetch('/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(followUpRequest)
+                });
+                
+                if (!followUpResponse.ok) {
+                    throw new Error(`Follow-up request failed: ${followUpResponse.statusText}`);
+                }
+                
+                const followUpData = await followUpResponse.json();
+                const followUpChoice = followUpData.choices?.[0];
+                if (followUpChoice?.message?.content) {
+                    fullResponse = followUpChoice.message.content;
+                } else {
+                    fullResponse = 'Tool execution completed, but no response generated.';
+                }
+            } else {
+                // No tool calls, just use the content
+                fullResponse = choice.message?.content || '';
             }
         }
         

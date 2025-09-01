@@ -72,6 +72,11 @@ function renderModels() {
                                 <i class="fas fa-user mr-1"></i>${model.author}
                             </span>` : ''
                         }
+                        ${model.supports_tools ?
+                            `<span class="ml-2 px-2 py-1 text-xs bg-green-700 text-green-300 rounded" title="This model supports function calling and tools">
+                                <i class="fas fa-tools mr-1"></i>Tools
+                            </span>` : ''
+                        }
                     </div>
                     <div class="flex items-center space-x-4 text-sm text-gray-400">
                         <span><i class="fas fa-memory mr-1"></i>${model.memory_required_gb} GB</span>
@@ -485,6 +490,89 @@ function initializeModelsSearch() {
     });
 }
 
+// Filter models by tool support
+function filterModelsByTools() {
+    const filterCheckbox = document.getElementById('filter-tools');
+    const showOnlyToolsEnabled = filterCheckbox.checked;
+    
+    if (showOnlyToolsEnabled) {
+        // Filter currentModels to only show tool-supporting models
+        const toolModels = currentModels.filter(model => model.supports_tools);
+        renderFilteredModels(toolModels, 'tool-enabled models');
+    } else {
+        // Show all models
+        renderModels();
+    }
+}
+
+// Render filtered models with a message
+function renderFilteredModels(models, filterType) {
+    const container = document.getElementById('models-list');
+
+    if (models.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-12">
+                <i class="fas fa-tools text-gray-500 text-4xl mb-4"></i>
+                <p class="text-gray-400">No ${filterType} found</p>
+                <p class="text-gray-500 text-sm">Try installing models that support function calling</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = models.map(model => `
+        <div class="bg-gray-800 rounded-lg p-4 card-hover">
+            <div class="flex items-center justify-between">
+                <div class="flex-1">
+                    <div class="flex items-center mb-2">
+                        <span class="status-indicator ${getStatusClass(model.status)}"
+                              ${model.status === 'loading' ? 'title="Model is currently loading..."' : ''}
+                              ${model.status === 'downloading' ? 'title="Model is downloading from HuggingFace..."' : ''}></span>
+                        <h3 class="text-lg font-medium text-white">
+                            ${model.huggingface_id ?
+                                `<a href="https://huggingface.co/${model.huggingface_id}" target="_blank" rel="noopener noreferrer"
+                                   class="hover:text-blue-300 transition-colors cursor-pointer">
+                                    ${model.name}
+                                </a>` :
+                                model.name
+                            }
+                        </h3>
+                        <span class="ml-2 px-2 py-1 text-xs bg-gray-700 text-gray-300 rounded">${model.type}</span>
+                        ${model.author && model.author !== 'unknown' ?
+                            `<span class="ml-2 px-2 py-1 text-xs bg-purple-700 text-purple-300 rounded">
+                                <i class="fas fa-user mr-1"></i>${model.author}
+                            </span>` : ''
+                        }
+                        ${model.supports_tools ?
+                            `<span class="ml-2 px-2 py-1 text-xs bg-green-700 text-green-300 rounded" title="This model supports function calling and tools">
+                                <i class="fas fa-tools mr-1"></i>Tools
+                            </span>` : ''
+                        }
+                    </div>
+                    <div class="flex items-center space-x-4 text-sm text-gray-400">
+                        <span><i class="fas fa-memory mr-1"></i>${model.memory_required_gb} GB</span>
+                        <span><i class="fas fa-clock mr-1"></i>Used ${model.use_count} times</span>
+                        ${model.last_used_at ? `<span><i class="fas fa-history mr-1"></i>${formatLocalTime(model.last_used_at)}</span>` : ''}
+                    </div>
+                </div>
+                <div class="flex space-x-2">
+                    ${model.status === 'loaded' ?
+                        `<button onclick="unloadModel('${model.name}')" class="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-sm">
+                            <i class="fas fa-stop mr-1"></i>Unload
+                        </button>` :
+                        `<button onclick="loadModel('${model.name}')" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">
+                            <i class="fas fa-play mr-1"></i>Load
+                        </button>`
+                    }
+                    <button onclick="removeModel('${model.name}')" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm">
+                        <i class="fas fa-trash mr-1"></i>Remove
+                    </button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
 // Export functions for global use
 window.refreshModels = refreshModels;
 window.loadModel = loadModel;
@@ -500,4 +588,5 @@ window.loadTrendingModels = loadTrendingModels;
 window.loadEmbeddingModels = loadEmbeddingModels;
 window.installModel = installModel;
 window.initializeModelsSearch = initializeModelsSearch;
+window.filterModelsByTools = filterModelsByTools;
 window.currentModels = currentModels;

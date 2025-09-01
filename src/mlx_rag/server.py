@@ -626,6 +626,151 @@ def _parse_tool_calls_from_text(text: str) -> List[Dict[str, Any]]:
     return unique_tool_calls
 
 
+def _check_model_supports_tools(model_path: str, model_name: str = None) -> bool:
+    """Check if a model supports function calling/tools by examining its configuration.
+    
+    Args:
+        model_path: Path to the model (HuggingFace ID or local path)
+        model_name: Optional model name for additional context
+        
+    Returns:
+        True if the model likely supports function calling, False otherwise
+    """
+    try:
+        # List of model patterns/names known to support function calling
+        function_calling_models = {
+            # OpenAI-style models
+            'gpt-4', 'gpt-3.5', 'gpt-35',
+            # Anthropic models
+            'claude',
+            # Google models
+            'gemini', 'bard',
+            # Meta models with function calling
+            'llama-3.1', 'llama-3.2', 'code-llama',
+            # Mistral models with function calling
+            'mistral', 'mixtral',
+            # Other function calling models
+            'hermes', 'functionary', 'gorilla', 'nexusraven',
+            # Specific MLX models known to support tools
+            'qwen', 'yi-', 'deepseek',
+            # Models with "chat" or "instruct" that often support tools
+            'chat', 'instruct', 'assistant'
+        }
+        
+        # Check model name/path against known patterns
+        model_identifier = (model_name or model_path or "").lower()
+        
+        # Check for explicit function calling indicators
+        for pattern in function_calling_models:
+            if pattern in model_identifier:
+                logger.debug(f"Model {model_identifier} matches function calling pattern: {pattern}")
+                return True
+        
+        # Try to load tokenizer config to check for function calling support
+        try:
+            from huggingface_hub import hf_hub_download
+            import json
+            import os
+            
+            # Try to get tokenizer config
+            config_path = None
+            if os.path.exists(model_path):
+                # Local model
+                tokenizer_config_path = os.path.join(model_path, "tokenizer_config.json")
+                if os.path.exists(tokenizer_config_path):
+                    config_path = tokenizer_config_path
+            else:
+                # HuggingFace model - try to download config
+                try:
+                    config_path = hf_hub_download(
+                        repo_id=model_path,
+                        filename="tokenizer_config.json",
+                        local_files_only=False
+                    )
+                except:
+                    pass
+            
+            if config_path and os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                
+                # Check for function calling related tokens or settings
+                chat_template = config.get('chat_template', '')
+                if chat_template:
+                    # Look for function calling indicators in chat template
+                    function_indicators = [
+                        'function', 'tool', 'call', 'available_tools',
+                        'tools', 'function_call', 'tool_call'
+                    ]
+                    
+                    template_lower = chat_template.lower()
+                    for indicator in function_indicators:
+                        if indicator in template_lower:
+                            logger.debug(f"Found function calling indicator '{indicator}' in chat template for {model_identifier}")
+                            return True
+                
+                # Check for special tokens related to function calling
+                special_tokens = config.get('added_tokens_decoder', {})
+                for token_info in special_tokens.values():
+                    if isinstance(token_info, dict):
+                        content = token_info.get('content', '').lower()
+                        if any(indicator in content for indicator in ['function', 'tool', 'call']):
+                            logger.debug(f"Found function calling token: {content} for {model_identifier}")
+                            return True
+        
+        except Exception as e:
+            logger.debug(f"Could not check tokenizer config for {model_identifier}: {e}")
+        
+        # Try to check model config as well
+        try:
+            from huggingface_hub import hf_hub_download
+            import json
+            import os
+            
+            config_path = None
+            if os.path.exists(model_path):
+                # Local model
+                model_config_path = os.path.join(model_path, "config.json")
+                if os.path.exists(model_config_path):
+                    config_path = model_config_path
+            else:
+                # HuggingFace model
+                try:
+                    config_path = hf_hub_download(
+                        repo_id=model_path,
+                        filename="config.json",
+                        local_files_only=False
+                    )
+                except:
+                    pass
+            
+            if config_path and os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                
+                # Check model architecture - some architectures are more likely to support tools
+                architectures = config.get('architectures', [])
+                for arch in architectures:
+                    arch_lower = arch.lower()
+                    # Models with these architectures often support function calling
+                    if any(pattern in arch_lower for pattern in ['llama', 'mistral', 'qwen', 'yi', 'gemma']):
+                        # Check if it's a recent/instruct version
+                        if any(indicator in model_identifier for indicator in ['instruct', 'chat', '3.1', '3.2', '2.1']):
+                            logger.debug(f"Model {model_identifier} has architecture {arch} and appears to be an instruct variant")
+                            return True
+        
+        except Exception as e:
+            logger.debug(f"Could not check model config for {model_identifier}: {e}")
+        
+        # Default to False if we can't determine support
+        logger.debug(f"Could not determine function calling support for {model_identifier}, defaulting to False")
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error checking tool support for {model_path}: {e}")
+        return False
+
+
 def _create_system_prompt_with_tools(
     tools: List[Dict[str, Any]], 
     context: Optional[str] = None,
@@ -745,6 +890,7 @@ def create_app() -> FastAPI:
                     "created_at": model.created_at.isoformat() if model.created_at else None,
                     "huggingface_id": model.huggingface_id,
                     "author": model.huggingface_id.split("/")[0] if model.huggingface_id and "/" in model.huggingface_id else "unknown",
+                    "supports_tools": _check_model_supports_tools(model.path, model.name),
                 }
                 for model in models
             ]
@@ -892,6 +1038,94 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(f"Error getting available tools: {e}")
             return {"tools": []}
+
+    @app.post("/v1/tools/execute")
+    async def execute_tool(
+        request: dict,
+        db: Session = Depends(get_db_session)
+    ):
+        """Execute a tool call."""
+        try:
+            # Get the active RAG collection
+            active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
+            
+            if not active_collection:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No active RAG collection for tool execution"
+                )
+            
+            # Initialize tool executor with the active collection path
+            tool_executor = get_tool_executor(active_collection.path)
+            
+            if not tool_executor.has_available_tools():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No tools available for execution"
+                )
+            
+            # Extract tool call details
+            function_name = request.get("function_name")
+            arguments_str = request.get("arguments", "{}")
+            tool_call_id = request.get("tool_call_id")
+            
+            if not function_name:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="function_name is required"
+                )
+            
+            # Parse arguments
+            try:
+                if isinstance(arguments_str, str):
+                    arguments = json.loads(arguments_str)
+                else:
+                    arguments = arguments_str
+            except json.JSONDecodeError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid JSON in arguments: {e}"
+                )
+            
+            # Create tool call in the expected format
+            tool_call = {
+                "id": tool_call_id or f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": function_name,
+                    "arguments": json.dumps(arguments)
+                }
+            }
+            
+            # Execute the tool call
+            results = await tool_executor.execute_tool_calls([tool_call])
+            
+            if not results:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Tool execution failed - no results returned"
+                )
+            
+            # Return the first result
+            result = results[0]
+            
+            # Return in a format that's easy for the frontend to use
+            return {
+                "success": result.success,
+                "result": result.result,
+                "error": result.error,
+                "tool_call_id": tool_call_id,
+                "function_name": function_name
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error executing tool: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Tool execution failed: {str(e)}"
+            )
 
     # Chat session management endpoints
     @app.get("/v1/chat/sessions")
@@ -2218,165 +2452,26 @@ def create_app() -> FastAPI:
                 is_vision_model = True
             logger.debug(f"🔧 Vision model check: is_vision_model={is_vision_model}, model_type={getattr(loaded_model.mlx_wrapper, 'model_type', 'unknown') if loaded_model else 'no_model'}")
 
-            # Handle streaming vs non-streaming
-            logger.debug(f"🔧 Request stream setting: {request.stream}")
+            # Always use non-streaming mode
+            logger.debug(f"🔧 Request stream setting: {request.stream} (forcing non-streaming)")
 
-            # Check if we need to handle vision models with images in streaming
-            force_vision_streaming = False
-            if request.stream and is_vision_model and images:
-                logger.warning("Streaming not yet supported for vision models with images - using vision processing with streaming format")
-                force_vision_streaming = True
+            # Always use non-streaming response (streaming disabled)
+            if is_vision_model:
+                # For vision models, process images and pass structured messages
+                processed_image_paths = await _process_image_urls(images)
+                result = await queued_generate_vision(request.model, chat_messages, processed_image_paths, config)
 
-            if request.stream:
-                if force_vision_streaming:
-                    # Handle vision models in streaming by processing images and generating non-streaming, then formatting as streaming
-                    processed_image_paths = await _process_image_urls(images)
-                    result = await queued_generate_vision(request.model, chat_messages, processed_image_paths, config)
-                    # Clean up temporary image files
-                    for img_path in processed_image_paths:
-                        try:
-                            import os
-                            os.unlink(img_path)
-                        except Exception as e:
-                            logger.warning(f"Failed to cleanup temporary image file {img_path}: {e}")
-
-                    # Convert the result to streaming format
-                    async def generate_vision_stream():
-                        """Generate streaming response chunks for vision model."""
-                        first_chunk = ChatCompletionStreamResponse(
-                            id=completion_id,
-                            created=created_time,
-                            model=request.model,
-                            choices=[
-                                ChatCompletionStreamChoice(
-                                    index=0,
-                                    delta={"role": "assistant"},
-                                    finish_reason=None
-                                )
-                            ]
-                        )
-                        yield f"data: {first_chunk.model_dump_json()}\n\n"
-
-                        # Stream the complete result as chunks
-                        content = result.text if result else ""
-                        chunk_size = 10  # Characters per chunk
-
-                        for i in range(0, len(content), chunk_size):
-                            chunk_content = content[i:i+chunk_size]
-                            stream_chunk = ChatCompletionStreamResponse(
-                                id=completion_id,
-                                created=created_time,
-                                model=request.model,
-                                choices=[
-                                    ChatCompletionStreamChoice(
-                                        index=0,
-                                        delta={"content": chunk_content},
-                                        finish_reason=None
-                                    )
-                                ]
-                            )
-                            yield f"data: {stream_chunk.model_dump_json()}\n\n"
-                            # Small delay to make it feel like real streaming
-                            import asyncio
-                            await asyncio.sleep(0.01)
-
-                        # Final chunk with finish_reason
-                        final_chunk = ChatCompletionStreamResponse(
-                            id=completion_id,
-                            created=created_time,
-                            model=request.model,
-                            choices=[
-                                ChatCompletionStreamChoice(
-                                    index=0,
-                                    delta={},
-                                    finish_reason="stop"
-                                )
-                            ]
-                        )
-                        yield f"data: {final_chunk.model_dump_json()}\n\n"
-                        yield "data: [DONE]\n\n"
-
-                    return StreamingResponse(
-                        generate_vision_stream(),
-                        media_type="text/event-stream",
-                        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
-                    )
-                else:
-                    # For all other streaming (non-vision), format to a string prompt
-                    prompt_string = await _apply_chat_template(loaded_model.mlx_wrapper.tokenizer, chat_messages, request.model)
-
-                async def generate_stream():
-                    """Generate streaming response chunks."""
-                    first_chunk = ChatCompletionStreamResponse(
-                        id=completion_id,
-                        created=created_time,
-                        model=request.model,
-                        choices=[
-                            ChatCompletionStreamChoice(
-                                index=0,
-                                delta={"role": "assistant"},
-                                finish_reason=None
-                            )
-                        ]
-                    )
-                    yield f"data: {first_chunk.model_dump_json()}\n\n"
-
-                    # Stream the generation with transparent queuing
-                    async for chunk in queued_generate_text_stream(request.model, prompt_string, config):
-                        if chunk:
-                            stream_chunk = ChatCompletionStreamResponse(
-                                id=completion_id,
-                                created=created_time,
-                                model=request.model,
-                                choices=[
-                                    ChatCompletionStreamChoice(
-                                        index=0,
-                                        delta={"content": chunk},
-                                        finish_reason=None
-                                    )
-                                ]
-                            )
-                            yield f"data: {stream_chunk.model_dump_json()}\n\n"
-
-                    # Final chunk with finish_reason
-                    final_chunk = ChatCompletionStreamResponse(
-                        id=completion_id,
-                        created=created_time,
-                        model=request.model,
-                        choices=[
-                            ChatCompletionStreamChoice(
-                                index=0,
-                                delta={},
-                                finish_reason="stop"
-                            )
-                        ]
-                    )
-                    yield f"data: {final_chunk.model_dump_json()}\n\n"
-                    yield "data: [DONE]\n\n"
-
-                return StreamingResponse(
-                    generate_stream(),
-                    media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
-                )
+                # Clean up temporary image files
+                for img_path in processed_image_paths:
+                    try:
+                        import os
+                        os.unlink(img_path)
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup temporary image file {img_path}: {e}")
             else:
-                # Non-streaming response
-                if is_vision_model:
-                    # For vision models, process images and pass structured messages
-                    processed_image_paths = await _process_image_urls(images)
-                    result = await queued_generate_vision(request.model, chat_messages, processed_image_paths, config)
-
-                    # Clean up temporary image files
-                    for img_path in processed_image_paths:
-                        try:
-                            import os
-                            os.unlink(img_path)
-                        except Exception as e:
-                            logger.warning(f"Failed to cleanup temporary image file {img_path}: {e}")
-                else:
-                    # For text models, format to a string and generate
-                    prompt_string = await _apply_chat_template(loaded_model.mlx_wrapper.tokenizer, chat_messages, request.model)
-                    result = await queued_generate_text(request.model, prompt_string, config)
+                # For text models, format to a string and generate
+                prompt_string = await _apply_chat_template(loaded_model.mlx_wrapper.tokenizer, chat_messages, request.model)
+                result = await queued_generate_text(request.model, prompt_string, config)
 
                 if not result:
                      raise HTTPException(
@@ -2815,7 +2910,8 @@ def create_app() -> FastAPI:
                         "owned_by": "mlx-rag",
                         "permission": [],
                         "root": model.name,
-                        "parent": None
+                        "parent": None,
+                        "supports_tools": _check_model_supports_tools(model.path, model.name)
                     }
                     for model in models
                 ]
