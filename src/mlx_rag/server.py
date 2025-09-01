@@ -868,6 +868,31 @@ def create_app() -> FastAPI:
         response = rag_manager.query(query, active_collection.name)
         return {"query": query, "response": response}
 
+    @app.get("/v1/tools")
+    async def get_available_tools(db: Session = Depends(get_db_session)):
+        """Get available tools for the active RAG collection."""
+        try:
+            # Get the active RAG collection
+            active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
+            
+            if not active_collection:
+                return {"tools": []}
+            
+            # Initialize tool executor with the active collection path
+            tool_executor = get_tool_executor(active_collection.path)
+            
+            if not tool_executor.has_available_tools():
+                return {"tools": []}
+            
+            # Get tools in OpenAI format
+            tools = tool_executor.get_tools_for_openai_request()
+            
+            return {"tools": tools}
+            
+        except Exception as e:
+            logger.error(f"Error getting available tools: {e}")
+            return {"tools": []}
+
     # Chat session management endpoints
     @app.get("/v1/chat/sessions")
     async def list_chat_sessions(db: Session = Depends(get_db_session)):

@@ -692,17 +692,24 @@ class RAGManager:
 
             collection.status = RAGCollectionStatus.PROCESSING.value
             session.commit()
+            
+            # Process the collection using the ID instead of the object to avoid session detachment
+            collection_id = collection.id
 
         try:
-            self._process_folder(collection)
+            self._process_folder_by_id(collection_id)
             with self.db_manager.get_session() as session:
-                collection.status = RAGCollectionStatus.READY.value
-                session.commit()
+                collection = session.query(RAGCollection).get(collection_id)
+                if collection:
+                    collection.status = RAGCollectionStatus.READY.value
+                    session.commit()
         except Exception as e:
             logger.error(f"Error reprocessing RAG collection {name}: {e}")
             with self.db_manager.get_session() as session:
-                collection.status = RAGCollectionStatus.ERROR.value
-                session.commit()
+                collection = session.query(RAGCollection).get(collection_id)
+                if collection:
+                    collection.status = RAGCollectionStatus.ERROR.value
+                    session.commit()
 
 # Global RAG manager instance
 _rag_manager: Optional[RAGManager] = None
