@@ -1,6 +1,16 @@
 # Agentic Tools Implementation
 
-MLX-RAG now includes a comprehensive agentic tools system that enables Large Language Models (LLMs) to perform file-system operations within RAG collection source directories. This implementation provides OpenAI-compatible tool calling functionality with robust security and sandboxing.
+MLX-RAG now includes a comprehensive agentic tools system with **dual implementations** that enables Large Language Models (LLMs) to perform file-system operations within RAG collection source directories. The system offers both an **original implementation** and a **LangChain-integrated implementation**, providing OpenAI-compatible tool calling functionality with robust security and sandboxing.
+
+## 🆕 LangChain Integration
+
+**NEW**: MLX-RAG now supports LangChain's powerful agent framework alongside the original tool system, providing enhanced capabilities including:
+
+- **Advanced Agent Capabilities**: Built-in ReAct agents, conversation memory, and sophisticated reasoning patterns
+- **Ecosystem Integration**: Access to LangChain's extensive tool and integration ecosystem 
+- **Enhanced Prompt Management**: LangChain's prompt templates and contextual prompt generation
+- **Seamless Migration Path**: Both systems run side-by-side, allowing gradual migration
+- **Maintained Compatibility**: Full OpenAI API compatibility preserved in both systems
 
 ## Table of Contents
 
@@ -34,7 +44,51 @@ The agentic tools system allows LLMs to:
 
 ## Architecture
 
-The implementation consists of three main components:
+MLX-RAG now offers **two complementary tool system implementations**:
+
+### 🔄 Dual System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    MLX-RAG Tool Systems                     │
+├─────────────────────┬───────────────────────────────────────┤
+│   Original System   │         LangChain System             │
+├─────────────────────┼───────────────────────────────────────┤
+│ • Direct execution  │ • Agent-based execution              │
+│ • Simple tool calls │ • ReAct agents                       │
+│ • Basic prompts     │ • Memory management                  │
+│ • Fast & lightweight│ • Contextual reasoning               │
+│                     │ • Ecosystem integration             │
+└─────────────────────┴───────────────────────────────────────┘
+              ↓                          ↓
+        ┌──────────────┐         ┌──────────────┐
+        │   Same File  │    ←→   │   Same File  │
+        │  Operations  │         │  Operations  │
+        └──────────────┘         └──────────────┘
+              ↓                          ↓
+        ┌────────────────────────────────────────┐
+        │      Unified Security Sandbox          │
+        │   • Path validation                    │
+        │   • File type restrictions             │
+        │   • Resource limits                    │
+        └────────────────────────────────────────┘
+```
+
+### 🎯 When to Use Each System
+
+**Use Original System when:**
+- Simple, direct tool execution is needed
+- Minimal dependencies are preferred
+- Fast response times are critical
+- Custom tool integration is required
+
+**Use LangChain System when:**
+- Complex reasoning patterns are needed
+- Memory and context management are important
+- Integration with LangChain ecosystem is desired
+- Advanced agent capabilities are required
+
+The implementation consists of the following main components:
 
 ### 1. Tool Definitions (`agentic_tools.py`)
 
@@ -245,6 +299,256 @@ def _validate_path(self, path: str) -> str:
 - File contents are validated for encoding and size
 - Operation parameters are strictly typed and validated
 
+## 🦜 LangChain System Deep Dive
+
+### LangChain Architecture Components
+
+The LangChain-integrated system provides advanced capabilities through several key components:
+
+#### 1. LangChain Tool Wrappers
+
+Each file system tool is wrapped as a LangChain `BaseTool` while maintaining full compatibility:
+
+```python
+class LangChainListDirectoryTool(BaseTool):
+    name: str = "list_directory"
+    description: str = "List files and directories in a specified path"
+    
+    class InputSchema(BaseModel):
+        path: str = Field(default=".", description="Directory path to list")
+        recursive: bool = Field(default=False, description="List recursively")
+        pattern: Optional[str] = Field(None, description="File pattern filter")
+    
+    def _run(self, path: str = ".", recursive: bool = False, pattern: str = None) -> str:
+        # Delegates to original AgenticTool implementation
+        return self.original_tool.execute_sync({"path": path, "recursive": recursive, "pattern": pattern})
+    
+    async def _arun(self, path: str = ".", recursive: bool = False, pattern: str = None) -> str:
+        # Async execution via original tool
+        return await self.original_tool.execute_async({"path": path, "recursive": recursive, "pattern": pattern})
+```
+
+#### 2. LangChain Tool Executor
+
+The `LangChainToolExecutor` provides enhanced tool management with agent capabilities:
+
+```python
+class LangChainToolExecutor:
+    def __init__(self, collection_path: str):
+        self.collection_path = collection_path
+        self.tools = self._initialize_langchain_tools()
+        self.llm = None  # Optional LLM for agent mode
+        self.memory = None  # Optional conversation memory
+    
+    def create_react_agent(self, llm, memory=None) -> AgentExecutor:
+        """Create a ReAct agent with tools and optional memory"""
+        
+    async def execute_single_tool_call_async(self, tool_call) -> ToolExecutionResult:
+        """Execute a single tool call with enhanced error handling"""
+        
+    async def execute_multiple_tool_calls_async(self, tool_calls) -> List[ToolExecutionResult]:
+        """Execute multiple tool calls concurrently"""
+```
+
+#### 3. Enhanced Prompt Management
+
+LangChain integration includes sophisticated prompt templates:
+
+```python
+# Contextual prompt generation based on user query and conversation history
+def generate_contextual_prompt(tools, user_query, conversation_history=None):
+    """Generate context-aware system prompts for optimal tool usage"""
+    
+# ReAct agent prompt templates
+def create_react_prompt_template(tools):
+    """Create ReAct-style reasoning prompt templates"""
+    
+# Tool usage workflow templates  
+def create_file_system_agent_prompt(tools):
+    """Create specialized prompts for file system operations"""
+```
+
+### LangChain-Specific Features
+
+#### 1. ReAct Agent Integration
+
+```python
+# Create a ReAct agent for sophisticated reasoning
+langchain_executor = get_langchain_tool_executor("/path/to/collection")
+agent = langchain_executor.create_react_agent(
+    llm=ChatMLX(model="llama-3-8b-instruct"),
+    memory=ConversationBufferMemory()
+)
+
+# Execute with reasoning capability
+result = await agent.arun(
+    "Analyze the project structure and create a summary document"
+)
+```
+
+#### 2. Memory and Context Management
+
+```python
+# Conversation memory for multi-turn interactions
+from langchain.memory import ConversationBufferWindowMemory
+
+memory = ConversationBufferWindowMemory(
+    k=10,  # Remember last 10 exchanges
+    return_messages=True
+)
+
+# Agent with persistent memory
+agent = langchain_executor.create_react_agent(llm, memory=memory)
+
+# Multi-turn conversation with context retention
+result1 = await agent.arun("List the Python files in the project")
+result2 = await agent.arun("Now read the main.py file we found") # Remembers context
+```
+
+#### 3. Advanced Tool Chaining
+
+```python
+# LangChain enables sophisticated tool chaining
+from langchain.chains import SequentialChain
+
+# Create a chain for complex file operations
+analysis_chain = SequentialChain(
+    chains=[
+        # 1. List project structure
+        SimpleSequentialChain([list_directory_tool]),
+        # 2. Find key files
+        SimpleSequentialChain([search_files_tool]), 
+        # 3. Analyze and summarize
+        SimpleSequentialChain([read_file_tool, write_file_tool])
+    ]
+)
+```
+
+### LangChain API Usage
+
+#### Basic Tool Execution
+
+```python
+# Get LangChain tool executor
+langchain_executor = get_langchain_tool_executor("/path/to/collection")
+
+# Check available tools
+if langchain_executor.has_available_tools():
+    tools = langchain_executor.get_openai_tool_definitions()
+    
+# Execute tool calls (same format as original system)
+tool_calls = [{
+    "id": "call_1",
+    "type": "function", 
+    "function": {
+        "name": "list_directory",
+        "arguments": {"path": "src", "recursive": True}
+    }
+}]
+
+results = await langchain_executor.execute_multiple_tool_calls_async(tool_calls)
+```
+
+#### Agent-Based Execution
+
+```python
+# Create and use a ReAct agent
+agent = langchain_executor.create_react_agent(
+    llm=get_llm("llama-3-8b-instruct"),
+    memory=ConversationBufferMemory()
+)
+
+# Natural language instructions with reasoning
+result = await agent.arun(
+    "I need to understand this Python project. First explore the structure, "
+    "then find the main entry points, and finally create a README with an overview."
+)
+
+print(result)  # Agent will use tools intelligently and provide reasoning
+```
+
+### Server API Integration
+
+#### Using LangChain System via API
+
+```bash
+# Get tools using LangChain system
+curl -X GET "http://localhost:8000/v1/tools?use_langchain=true"
+
+# Execute tools using LangChain system  
+curl -X POST "http://localhost:8000/v1/tools/execute?use_langchain=true" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "function_name": "list_directory",
+    "arguments": {"path": "src", "recursive": true},
+    "tool_call_id": "call_123"
+  }'
+```
+
+#### Response Format
+
+```json
+{
+  "success": true,
+  "result": "Directory listing results...",
+  "error": null,
+  "tool_call_id": "call_123",
+  "function_name": "list_directory",
+  "system": "langchain"
+}
+```
+
+### Migration Guide
+
+#### Gradual Migration Strategy
+
+1. **Phase 1**: Start using LangChain system for new features
+2. **Phase 2**: Migrate complex workflows to LangChain agents
+3. **Phase 3**: Leverage LangChain ecosystem integrations
+4. **Phase 4**: Optional full migration when ready
+
+#### Code Migration Examples
+
+**Before (Original System):**
+```python
+# Direct tool execution
+executor = get_tool_executor("/path")
+results = await executor.execute_tool_calls(tool_calls)
+```
+
+**After (LangChain System):**
+```python
+# Enhanced execution with agent capabilities
+executor = get_langchain_tool_executor("/path")
+results = await executor.execute_multiple_tool_calls_async(tool_calls)
+# OR use agent mode for complex reasoning
+agent = executor.create_react_agent(llm)
+result = await agent.arun("Complex natural language instruction")
+```
+
+### Performance Considerations
+
+#### LangChain System Overhead
+
+- **Startup Time**: Slightly higher due to LangChain initialization
+- **Memory Usage**: Additional memory for agent state and memory
+- **Execution Time**: Comparable for simple operations, faster for complex workflows
+- **Benefits**: Advanced reasoning, memory, and ecosystem access
+
+#### Optimization Tips
+
+```python
+# Reuse LangChain executors to avoid initialization overhead
+executor = get_langchain_tool_executor("/path")
+# Cache the executor for multiple operations
+
+# Use async operations for better concurrency
+results = await executor.execute_multiple_tool_calls_async(tool_calls)
+
+# Configure memory limits for long conversations
+memory = ConversationBufferWindowMemory(k=5)  # Limit to 5 recent exchanges
+```
+
 ## Integration
 
 ### Tool Executor Integration
@@ -311,7 +615,9 @@ Tools are exposed through standard OpenAI chat completion parameters:
 
 ## API Reference
 
-### ToolExecutor Class
+### Original System API
+
+#### ToolExecutor Class
 
 #### Methods
 
@@ -361,6 +667,279 @@ class ToolExecutionResult:
 
 - `get_openai_function_definition() -> Dict[str, Any]` - OpenAI-compatible definition
 - `validate_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]` - Validate inputs
+
+### LangChain System API
+
+#### LangChainToolExecutor Class
+
+**Purpose**: Advanced tool executor with agent capabilities and LangChain integration
+
+**Initialization**:
+```python
+from agentic_tools import get_langchain_tool_executor
+
+# Initialize with collection path
+executor = get_langchain_tool_executor("/path/to/rag/collection")
+```
+
+#### Core Methods
+
+- `get_available_tools() -> List[BaseTool]`
+  - Returns list of LangChain BaseTool instances
+  - Each tool maintains compatibility with original functionality
+
+- `get_openai_tool_definitions() -> List[Dict[str, Any]]`
+  - Returns OpenAI-compatible tool definitions
+  - Compatible with both original and LangChain formats
+
+- `execute_single_tool_call_async(tool_call: Dict) -> ToolExecutionResult`
+  - Execute individual tool call with enhanced error handling
+  - Supports both sync and async execution patterns
+
+- `execute_multiple_tool_calls_async(tool_calls: List[Dict]) -> List[ToolExecutionResult]`
+  - Concurrent execution of multiple tool calls
+  - Optimized for LangChain agent workflows
+
+- `has_available_tools() -> bool`
+  - Check tool availability status
+  - Validates LangChain tool initialization
+
+#### Agent Creation Methods
+
+- `create_react_agent(llm, memory=None, verbose=False) -> AgentExecutor`
+  - Creates ReAct (Reasoning + Acting) agent with file system tools
+  - Supports conversation memory and verbose logging
+  - Returns configured `AgentExecutor` instance
+
+**Example**:
+```python
+from langchain.memory import ConversationBufferMemory
+from langchain_mlx import ChatMLX
+
+# Create ReAct agent with memory
+agent = executor.create_react_agent(
+    llm=ChatMLX(model="llama-3-8b-instruct"),
+    memory=ConversationBufferMemory(),
+    verbose=True
+)
+
+# Execute with natural language instructions
+result = await agent.arun(
+    "Analyze the Python files in this project and create a summary"
+)
+```
+
+#### LangChain Tool Wrapper Classes
+
+Each original tool is wrapped as a LangChain `BaseTool`:
+
+#### LangChainListDirectoryTool
+
+```python
+class LangChainListDirectoryTool(BaseTool):
+    name: str = "list_directory"
+    description: str = "List files and directories in a specified path within the RAG collection"
+    
+    class InputSchema(BaseModel):
+        path: str = Field(default=".", description="Directory path to list")
+        show_hidden: bool = Field(default=False, description="Include hidden files")
+        recursive: bool = Field(default=False, description="List subdirectories recursively")
+        pattern: Optional[str] = Field(None, description="File name pattern filter")
+    
+    def _run(self, path: str = ".", show_hidden: bool = False, 
+             recursive: bool = False, pattern: str = None) -> str:
+        """Synchronous execution"""
+    
+    async def _arun(self, path: str = ".", show_hidden: bool = False,
+                    recursive: bool = False, pattern: str = None) -> str:
+        """Asynchronous execution (recommended)"""
+```
+
+#### LangChainReadFileTool
+
+```python
+class LangChainReadFileTool(BaseTool):
+    name: str = "read_file"
+    description: str = "Read the contents of a text file with automatic encoding detection"
+    
+    class InputSchema(BaseModel):
+        file_path: str = Field(description="Relative path to the file to read")
+        encoding: Optional[str] = Field(None, description="Specific encoding (auto-detected if not specified)")
+    
+    def _run(self, file_path: str, encoding: str = None) -> str:
+        """Synchronous file reading"""
+    
+    async def _arun(self, file_path: str, encoding: str = None) -> str:
+        """Asynchronous file reading (recommended)"""
+```
+
+#### LangChainSearchFilesTool
+
+```python
+class LangChainSearchFilesTool(BaseTool):
+    name: str = "search_files"
+    description: str = "Search for patterns within files using regular expressions"
+    
+    class InputSchema(BaseModel):
+        pattern: str = Field(description="Regular expression pattern to search for")
+        file_pattern: str = Field(default="*", description="Glob pattern for files to search")
+        max_results: int = Field(default=100, description="Maximum number of results")
+        case_sensitive: bool = Field(default=False, description="Case-sensitive search")
+    
+    def _run(self, pattern: str, file_pattern: str = "*", 
+             max_results: int = 100, case_sensitive: bool = False) -> str:
+        """Synchronous search"""
+    
+    async def _arun(self, pattern: str, file_pattern: str = "*",
+                    max_results: int = 100, case_sensitive: bool = False) -> str:
+        """Asynchronous search (recommended)"""
+```
+
+#### LangChainWriteFileTool
+
+```python
+class LangChainWriteFileTool(BaseTool):
+    name: str = "write_file"
+    description: str = "Create a new file with specified content"
+    
+    class InputSchema(BaseModel):
+        file_path: str = Field(description="Relative path for the new file")
+        content: str = Field(description="Content to write to the file")
+        encoding: str = Field(default="utf-8", description="Text encoding")
+        create_directories: bool = Field(default=True, description="Create parent directories")
+    
+    def _run(self, file_path: str, content: str, 
+             encoding: str = "utf-8", create_directories: bool = True) -> str:
+        """Synchronous file creation"""
+    
+    async def _arun(self, file_path: str, content: str,
+                    encoding: str = "utf-8", create_directories: bool = True) -> str:
+        """Asynchronous file creation (recommended)"""
+```
+
+#### LangChainEditFileTool
+
+```python
+class LangChainEditFileTool(BaseTool):
+    name: str = "edit_file"
+    description: str = "Edit existing files using line-based operations"
+    
+    class InputSchema(BaseModel):
+        file_path: str = Field(description="Relative path to the file to edit")
+        operations: List[Dict[str, Any]] = Field(description="List of edit operations")
+    
+    def _run(self, file_path: str, operations: List[Dict[str, Any]]) -> str:
+        """Synchronous file editing"""
+    
+    async def _arun(self, file_path: str, operations: List[Dict[str, Any]]) -> str:
+        """Asynchronous file editing (recommended)"""
+```
+
+#### Advanced LangChain Features
+
+#### Memory Integration
+
+```python
+# Conversation Buffer Memory
+from langchain.memory import ConversationBufferMemory, ConversationBufferWindowMemory
+
+# Basic conversation memory
+memory = ConversationBufferMemory(return_messages=True)
+
+# Window memory (last N exchanges)
+window_memory = ConversationBufferWindowMemory(
+    k=5,  # Remember last 5 exchanges
+    return_messages=True
+)
+
+# Use with agent
+agent = executor.create_react_agent(llm, memory=memory)
+```
+
+#### Custom Prompt Templates
+
+```python
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+# Create custom prompt for file system operations
+file_system_prompt = ChatPromptTemplate.from_messages([
+    ("system", 
+     "You are an AI assistant with access to file system tools. "
+     "You can list directories, read files, search content, write new files, and edit existing files. "
+     "Always validate file paths and handle errors gracefully. "
+     "Use tools strategically and provide clear explanations of your actions."),
+    MessagesPlaceholder(variable_name="chat_history"),
+    ("human", "{input}"),
+    MessagesPlaceholder(variable_name="agent_scratchpad"),
+])
+
+# Use custom prompt with agent
+agent = executor.create_react_agent(llm, memory=memory, prompt=file_system_prompt)
+```
+
+#### Tool Result Processing
+
+```python
+# Enhanced tool result with LangChain metadata
+class LangChainToolExecutionResult(ToolExecutionResult):
+    """Extended result with LangChain-specific information"""
+    langchain_metadata: Dict[str, Any] = None
+    agent_reasoning: Optional[str] = None
+    tool_chain: List[str] = None  # Track tool usage sequence
+    
+    def to_langchain_format(self) -> Dict[str, Any]:
+        """Convert to LangChain-compatible format"""
+        return {
+            "output": self.result,
+            "success": self.success,
+            "error": self.error,
+            "metadata": self.langchain_metadata or {},
+            "execution_time_ms": self.execution_time_ms
+        }
+```
+
+#### Async Execution Patterns
+
+```python
+# Recommended async patterns for LangChain integration
+
+# Single tool execution
+result = await executor.execute_single_tool_call_async({
+    "id": "call_1",
+    "type": "function",
+    "function": {
+        "name": "read_file",
+        "arguments": {"file_path": "src/main.py"}
+    }
+})
+
+# Multiple tool execution (concurrent)
+results = await executor.execute_multiple_tool_calls_async([
+    {"id": "call_1", "function": {"name": "list_directory", "arguments": {"path": "src"}}},
+    {"id": "call_2", "function": {"name": "search_files", "arguments": {"pattern": "def main"}}}
+])
+
+# Agent-based execution (with reasoning)
+result = await agent.arun("Analyze the project structure and summarize the main components")
+```
+
+#### Global Functions
+
+```python
+# LangChain-specific global functions
+
+def get_langchain_tool_executor(collection_path: str) -> LangChainToolExecutor:
+    """Get or create a LangChain tool executor for the specified collection"""
+    
+def clear_langchain_tool_executor():
+    """Clear the cached LangChain tool executor"""
+    
+def get_langchain_tools_list(collection_path: str) -> List[BaseTool]:
+    """Get list of available LangChain tools"""
+    
+def create_file_system_agent(llm, collection_path: str, **kwargs) -> AgentExecutor:
+    """Convenience function to create a file system agent"""
+```
 
 ## Usage Examples
 

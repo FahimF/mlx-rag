@@ -50,6 +50,10 @@ dependencies = [
     "chromadb>=0.4.24",
     "tree-sitter>=0.21.0",
     "tree-sitter-python>=0.20.4",
+    # LangChain integration
+    "langchain>=0.1.0",
+    "langchain-core>=0.1.0",
+    "langchain-community>=0.0.10",
 ]
 
 [project.optional-dependencies]

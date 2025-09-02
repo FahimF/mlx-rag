@@ -1,19 +1,24 @@
 """
-Agentic Tools System for MLX-RAG
+LangChain-based Agentic Tools System for MLX-RAG
 
-This module provides a framework for LLMs to interact with RAG collection source folders
-through various tools like file search, editing, creation, etc.
+This module provides a LangChain-compatible framework for LLMs to interact with RAG 
+collection source folders through various tools like file search, editing, creation, etc.
 """
 
 import os
 import json
 import logging
-from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional, Union
+import asyncio
+from typing import Dict, List, Any, Optional, Union, Type
 from pathlib import Path
 from dataclasses import dataclass
+from abc import ABC, abstractmethod
 import fnmatch
 import difflib
+
+from langchain.tools import BaseTool
+from langchain_core.tools import ToolException
+from pydantic import BaseModel, Field, validator
 
 logger = logging.getLogger(__name__)
 
@@ -840,6 +845,268 @@ class AgenticToolManager:
         return tools
 
 
+# LangChain-compatible tool wrappers
+
+class ListDirectoryInput(BaseModel):
+    """Input schema for ListDirectoryTool."""
+    path: str = Field(default="", description="Relative path within the collection to list")
+    include_hidden: bool = Field(default=False, description="Include hidden files and directories")
+    pattern: str = Field(default="*", description="File pattern to match (glob pattern)")
+
+class LangChainListDirectoryTool(BaseTool):
+    """LangChain wrapper for ListDirectoryTool."""
+    name: str = "list_directory"
+    description: str = "List files and directories in the RAG collection source folder. Use this to explore the codebase structure."
+    args_schema: Type[BaseModel] = ListDirectoryInput
+    
+    def __init__(self, collection_path: str, **kwargs):
+        super().__init__(**kwargs)
+        self._internal_tool = ListDirectoryTool(collection_path)
+    
+    def _run(self, path: str = "", include_hidden: bool = False, pattern: str = "*") -> str:
+        """Synchronous implementation."""
+        # Run async method synchronously
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                self._internal_tool.execute(
+                    path=path, include_hidden=include_hidden, pattern=pattern
+                )
+            )
+            if result.success:
+                return json.dumps(result.result, indent=2)
+            else:
+                raise ToolException(result.error or "Unknown error")
+        finally:
+            loop.close()
+    
+    async def _arun(self, path: str = "", include_hidden: bool = False, pattern: str = "*") -> str:
+        """Asynchronous implementation."""
+        result = await self._internal_tool.execute(
+            path=path, include_hidden=include_hidden, pattern=pattern
+        )
+        if result.success:
+            return json.dumps(result.result, indent=2)
+        else:
+            raise ToolException(result.error or "Unknown error")
+
+
+class ReadFileInput(BaseModel):
+    """Input schema for ReadFileTool."""
+    path: str = Field(description="Relative path to the file within the collection")
+    start_line: Optional[int] = Field(default=1, description="Start reading from this line number (1-based)")
+    end_line: Optional[int] = Field(default=None, description="Stop reading at this line number (1-based)")
+
+class LangChainReadFileTool(BaseTool):
+    """LangChain wrapper for ReadFileTool."""
+    name: str = "read_file"
+    description: str = "Read the contents of a file in the RAG collection. Use this to examine source code, configuration files, documentation, etc."
+    args_schema: Type[BaseModel] = ReadFileInput
+    
+    def __init__(self, collection_path: str, **kwargs):
+        super().__init__(**kwargs)
+        self._internal_tool = ReadFileTool(collection_path)
+    
+    def _run(self, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str:
+        """Synchronous implementation."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                self._internal_tool.execute(
+                    path=path, start_line=start_line, end_line=end_line
+                )
+            )
+            if result.success:
+                return json.dumps(result.result, indent=2)
+            else:
+                raise ToolException(result.error or "Unknown error")
+        finally:
+            loop.close()
+    
+    async def _arun(self, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str:
+        """Asynchronous implementation."""
+        result = await self._internal_tool.execute(
+            path=path, start_line=start_line, end_line=end_line
+        )
+        if result.success:
+            return json.dumps(result.result, indent=2)
+        else:
+            raise ToolException(result.error or "Unknown error")
+
+
+class SearchFilesInput(BaseModel):
+    """Input schema for SearchFilesTool."""
+    query: str = Field(description="Text to search for")
+    path: str = Field(default="", description="Relative path to search within (default: entire collection)")
+    file_pattern: str = Field(default="*", description="File pattern to search within (glob pattern)")
+    case_sensitive: bool = Field(default=False, description="Whether the search should be case sensitive")
+    max_results: int = Field(default=50, description="Maximum number of results to return")
+
+class LangChainSearchFilesTool(BaseTool):
+    """LangChain wrapper for SearchFilesTool."""
+    name: str = "search_files"
+    description: str = "Search for text patterns within files in the RAG collection. Use this to find specific code, functions, or text content."
+    args_schema: Type[BaseModel] = SearchFilesInput
+    
+    def __init__(self, collection_path: str, **kwargs):
+        super().__init__(**kwargs)
+        self._internal_tool = SearchFilesTool(collection_path)
+    
+    def _run(self, query: str, path: str = "", file_pattern: str = "*", 
+             case_sensitive: bool = False, max_results: int = 50) -> str:
+        """Synchronous implementation."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                self._internal_tool.execute(
+                    query=query, path=path, file_pattern=file_pattern,
+                    case_sensitive=case_sensitive, max_results=max_results
+                )
+            )
+            if result.success:
+                return json.dumps(result.result, indent=2)
+            else:
+                raise ToolException(result.error or "Unknown error")
+        finally:
+            loop.close()
+    
+    async def _arun(self, query: str, path: str = "", file_pattern: str = "*", 
+                   case_sensitive: bool = False, max_results: int = 50) -> str:
+        """Asynchronous implementation."""
+        result = await self._internal_tool.execute(
+            query=query, path=path, file_pattern=file_pattern,
+            case_sensitive=case_sensitive, max_results=max_results
+        )
+        if result.success:
+            return json.dumps(result.result, indent=2)
+        else:
+            raise ToolException(result.error or "Unknown error")
+
+
+class WriteFileInput(BaseModel):
+    """Input schema for WriteFileTool."""
+    path: str = Field(description="Relative path to the file within the collection")
+    content: str = Field(description="Content to write to the file")
+    create_dirs: bool = Field(default=False, description="Whether to create parent directories if they don't exist")
+
+class LangChainWriteFileTool(BaseTool):
+    """LangChain wrapper for WriteFileTool."""
+    name: str = "write_file"
+    description: str = "Write content to a file in the RAG collection. This will create a new file or overwrite an existing one. Use with caution!"
+    args_schema: Type[BaseModel] = WriteFileInput
+    
+    def __init__(self, collection_path: str, **kwargs):
+        super().__init__(**kwargs)
+        self._internal_tool = WriteFileTool(collection_path)
+    
+    def _run(self, path: str, content: str, create_dirs: bool = False) -> str:
+        """Synchronous implementation."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                self._internal_tool.execute(
+                    path=path, content=content, create_dirs=create_dirs
+                )
+            )
+            if result.success:
+                return json.dumps(result.result, indent=2)
+            else:
+                raise ToolException(result.error or "Unknown error")
+        finally:
+            loop.close()
+    
+    async def _arun(self, path: str, content: str, create_dirs: bool = False) -> str:
+        """Asynchronous implementation."""
+        result = await self._internal_tool.execute(
+            path=path, content=content, create_dirs=create_dirs
+        )
+        if result.success:
+            return json.dumps(result.result, indent=2)
+        else:
+            raise ToolException(result.error or "Unknown error")
+
+
+class EditFileInput(BaseModel):
+    """Input schema for EditFileTool."""
+    path: str = Field(description="Relative path to the file within the collection")
+    start_line: int = Field(description="Start line number to replace (1-based)")
+    end_line: int = Field(description="End line number to replace (1-based, inclusive)")
+    new_content: str = Field(description="New content to replace the selected lines with")
+
+class LangChainEditFileTool(BaseTool):
+    """LangChain wrapper for EditFileTool."""
+    name: str = "edit_file"
+    description: str = "Edit a file by replacing specific lines or sections. This is safer than overwriting entire files."
+    args_schema: Type[BaseModel] = EditFileInput
+    
+    def __init__(self, collection_path: str, **kwargs):
+        super().__init__(**kwargs)
+        self._internal_tool = EditFileTool(collection_path)
+    
+    def _run(self, path: str, start_line: int, end_line: int, new_content: str) -> str:
+        """Synchronous implementation."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                self._internal_tool.execute(
+                    path=path, start_line=start_line, end_line=end_line, new_content=new_content
+                )
+            )
+            if result.success:
+                return json.dumps(result.result, indent=2)
+            else:
+                raise ToolException(result.error or "Unknown error")
+        finally:
+            loop.close()
+    
+    async def _arun(self, path: str, start_line: int, end_line: int, new_content: str) -> str:
+        """Asynchronous implementation."""
+        result = await self._internal_tool.execute(
+            path=path, start_line=start_line, end_line=end_line, new_content=new_content
+        )
+        if result.success:
+            return json.dumps(result.result, indent=2)
+        else:
+            raise ToolException(result.error or "Unknown error")
+
+
+# LangChain Tool Factory
+class LangChainToolFactory:
+    """Factory for creating LangChain-compatible tools."""
+    
+    @staticmethod
+    def create_file_system_tools(collection_path: str) -> List[BaseTool]:
+        """Create all LangChain file system tools for a collection."""
+        return [
+            LangChainListDirectoryTool(collection_path),
+            LangChainReadFileTool(collection_path),
+            LangChainSearchFilesTool(collection_path),
+            LangChainWriteFileTool(collection_path),
+            LangChainEditFileTool(collection_path)
+        ]
+    
+    @staticmethod
+    def get_tool_by_name(tool_name: str, collection_path: str) -> Optional[BaseTool]:
+        """Get a specific tool by name."""
+        tool_map = {
+            "list_directory": LangChainListDirectoryTool,
+            "read_file": LangChainReadFileTool,
+            "search_files": LangChainSearchFilesTool,
+            "write_file": LangChainWriteFileTool,
+            "edit_file": LangChainEditFileTool
+        }
+        
+        tool_class = tool_map.get(tool_name)
+        if tool_class:
+            return tool_class(collection_path)
+        return None
+
+
 # Global tool manager instance
 _tool_manager = None
 
@@ -849,3 +1116,8 @@ def get_tool_manager() -> AgenticToolManager:
     if _tool_manager is None:
         _tool_manager = AgenticToolManager()
     return _tool_manager
+
+
+def create_langchain_tools(collection_path: str) -> List[BaseTool]:
+    """Create LangChain-compatible tools for the given collection path."""
+    return LangChainToolFactory.create_file_system_tools(collection_path)

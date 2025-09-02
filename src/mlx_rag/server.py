@@ -28,7 +28,12 @@ from mlx_rag.rag_manager import get_rag_manager
 from mlx_rag.mlx_integration import GenerationConfig, get_inference_engine
 from mlx_rag.inference_queue_manager import get_inference_manager, QueuedRequest
 from mlx_rag.queued_inference import queued_generate_text, queued_generate_text_stream, queued_transcribe_audio, queued_generate_speech, queued_generate_embeddings, queued_generate_vision
-from mlx_rag.tool_executor import get_tool_executor, ToolExecutionResult
+from mlx_rag.tool_executor import (
+    get_tool_executor, 
+    get_langchain_tool_executor, 
+    ToolExecutionResult,
+    LangChainToolExecutor
+)
 from mlx_rag import __version__
 import re
 
@@ -1196,33 +1201,59 @@ def create_app() -> FastAPI:
         return {"query": query, "response": response}
 
     @app.get("/v1/tools")
-    async def get_available_tools(db: Session = Depends(get_db_session)):
+    async def get_available_tools(
+        use_langchain: bool = False,
+        db: Session = Depends(get_db_session)
+    ):
         """Get available tools for the active RAG collection."""
         try:
             # Get the active RAG collection
             active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
             
             if not active_collection:
-                return {"tools": []}
+                return {"tools": [], "system": "original"}
             
-            # Initialize tool executor with the active collection path
-            tool_executor = get_tool_executor(active_collection.path)
-            
-            if not tool_executor.has_available_tools():
-                return {"tools": []}
-            
-            # Get tools in OpenAI format
-            tools = tool_executor.get_tools_for_openai_request()
-            
-            return {"tools": tools}
+            if use_langchain:
+                # Use LangChain tool executor
+                langchain_executor = get_langchain_tool_executor(active_collection.path)
+                
+                if not langchain_executor.has_available_tools():
+                    return {"tools": [], "system": "langchain"}
+                
+                # Get tools in OpenAI format from LangChain
+                tools = langchain_executor.get_openai_tool_definitions()
+                
+                return {
+                    "tools": tools, 
+                    "system": "langchain",
+                    "tool_count": len(tools),
+                    "collection_path": active_collection.path
+                }
+            else:
+                # Use original tool executor
+                tool_executor = get_tool_executor(active_collection.path)
+                
+                if not tool_executor.has_available_tools():
+                    return {"tools": [], "system": "original"}
+                
+                # Get tools in OpenAI format
+                tools = tool_executor.get_tools_for_openai_request()
+                
+                return {
+                    "tools": tools,
+                    "system": "original", 
+                    "tool_count": len(tools),
+                    "collection_path": active_collection.path
+                }
             
         except Exception as e:
             logger.error(f"Error getting available tools: {e}")
-            return {"tools": []}
+            return {"tools": [], "error": str(e)}
 
     @app.post("/v1/tools/execute")
     async def execute_tool(
         request: dict,
+        use_langchain: bool = False,
         db: Session = Depends(get_db_session)
     ):
         """Execute a tool call."""
@@ -1234,15 +1265,6 @@ def create_app() -> FastAPI:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="No active RAG collection for tool execution"
-                )
-            
-            # Initialize tool executor with the active collection path
-            tool_executor = get_tool_executor(active_collection.path)
-            
-            if not tool_executor.has_available_tools():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="No tools available for execution"
                 )
             
             # Extract tool call details
@@ -1268,36 +1290,88 @@ def create_app() -> FastAPI:
                     detail=f"Invalid JSON in arguments: {e}"
                 )
             
-            # Create tool call in the expected format
-            tool_call = {
-                "id": tool_call_id or f"call_{uuid.uuid4().hex[:8]}",
-                "type": "function",
-                "function": {
-                    "name": function_name,
-                    "arguments": json.dumps(arguments)
+            if use_langchain:
+                # Use LangChain tool executor
+                langchain_executor = get_langchain_tool_executor(active_collection.path)
+                
+                if not langchain_executor.has_available_tools():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="No LangChain tools available for execution"
+                    )
+                
+                # Create tool call in the expected format
+                tool_call = {
+                    "id": tool_call_id or f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": function_name,
+                        "arguments": json.dumps(arguments)
+                    }
                 }
-            }
-            
-            # Execute the tool call
-            results = await tool_executor.execute_tool_calls([tool_call])
-            
-            if not results:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Tool execution failed - no results returned"
-                )
-            
-            # Return the first result
-            result = results[0]
-            
-            # Return in a format that's easy for the frontend to use
-            return {
-                "success": result.success,
-                "result": result.result,
-                "error": result.error,
-                "tool_call_id": tool_call_id,
-                "function_name": function_name
-            }
+                
+                # Execute using LangChain
+                results = await langchain_executor.execute_multiple_tool_calls_async([tool_call])
+                
+                if not results:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="LangChain tool execution failed - no results returned"
+                    )
+                
+                # Return the first result
+                result = results[0]
+                
+                # Return in a format that's easy for the frontend to use
+                return {
+                    "success": result.success,
+                    "result": result.result,
+                    "error": result.error,
+                    "tool_call_id": tool_call_id,
+                    "function_name": function_name,
+                    "system": "langchain"
+                }
+            else:
+                # Use original tool executor
+                tool_executor = get_tool_executor(active_collection.path)
+                
+                if not tool_executor.has_available_tools():
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="No tools available for execution"
+                    )
+                
+                # Create tool call in the expected format
+                tool_call = {
+                    "id": tool_call_id or f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": function_name,
+                        "arguments": json.dumps(arguments)
+                    }
+                }
+                
+                # Execute the tool call
+                results = await tool_executor.execute_tool_calls([tool_call])
+                
+                if not results:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Tool execution failed - no results returned"
+                    )
+                
+                # Return the first result
+                result = results[0]
+                
+                # Return in a format that's easy for the frontend to use
+                return {
+                    "success": result.success,
+                    "result": result.result,
+                    "error": result.error,
+                    "tool_call_id": tool_call_id,
+                    "function_name": function_name,
+                    "system": "original"
+                }
             
         except HTTPException:
             raise

@@ -1,13 +1,17 @@
 """
-Tool prompt templates and system prompt generation utilities.
+LangChain-integrated tool prompt templates and system prompt generation utilities.
 
 This module provides comprehensive templates and utilities for creating system prompts
-that teach LLMs how to effectively use available tools.
+that teach LLMs how to effectively use available tools with LangChain integration.
 """
 
 import json
 from typing import List, Dict, Any, Optional
 import logging
+
+from langchain_core.prompts import PromptTemplate, ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate
+from langchain_core.tools import BaseTool
+from langchain.schema import BaseMessage
 
 logger = logging.getLogger(__name__)
 
@@ -469,3 +473,136 @@ def validate_tool_call_format(tool_call_text: str) -> Dict[str, Any]:
         return {"valid": False, "error": f"Invalid JSON format: {str(e)}"}
     except Exception as e:
         return {"valid": False, "error": f"Unexpected error: {str(e)}"}
+
+
+# LangChain-specific prompt templates
+
+def create_react_prompt_template() -> PromptTemplate:
+    """Create a ReAct prompt template for LangChain agents."""
+    template = """You are a helpful assistant that can interact with files in a RAG collection.
+You have access to the following tools:
+
+{tools}
+
+Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+
+Begin!
+
+Question: {input}
+Thought: {agent_scratchpad}"""
+    
+    return PromptTemplate(
+        template=template,
+        input_variables=["input", "tools", "tool_names", "agent_scratchpad"]
+    )
+
+
+def create_file_system_agent_prompt() -> PromptTemplate:
+    """Create a specialized prompt template for file system operations."""
+    template = """You are a file system assistant that helps users explore, analyze, and modify code repositories.
+
+You have access to these file system tools:
+{tools}
+
+When working with files:
+1. Always start by exploring the directory structure if you're unfamiliar with the project
+2. Read files completely before making changes
+3. Use search to find specific content across multiple files
+4. Make targeted edits rather than rewriting entire files
+5. Explain what you're doing and why
+
+You should respond in this format:
+
+Thought: What I need to do and why
+Action: The tool to use
+Action Input: The parameters for the tool
+Observation: What the tool returned
+Thought: My analysis of the results
+... repeat as needed ...
+Final Answer: My complete response to the user
+
+Question: {input}
+Thought: {agent_scratchpad}"""
+    
+    return PromptTemplate(
+        template=template,
+        input_variables=["input", "tools", "agent_scratchpad"]
+    )
+
+
+def create_chat_prompt_template() -> ChatPromptTemplate:
+    """Create a chat prompt template for conversational tool usage."""
+    system_message = SystemMessagePromptTemplate.from_template(
+        """You are a helpful AI assistant with access to file system tools for exploring and modifying code repositories.
+        
+Available tools:
+{tools}
+
+Guidelines:
+- Explore before modifying
+- Explain your actions
+- Be systematic and thorough
+- Handle errors gracefully
+
+Use tools when needed to help the user with their requests."""
+    )
+    
+    human_message = HumanMessagePromptTemplate.from_template("{input}")
+    
+    return ChatPromptTemplate.from_messages([
+        system_message,
+        human_message
+    ])
+
+
+def create_tool_description_for_langchain(tools: List[BaseTool]) -> str:
+    """Create a formatted tool description string for LangChain prompts."""
+    if not tools:
+        return "No tools available."
+    
+    descriptions = []
+    tool_names = []
+    
+    for tool in tools:
+        tool_names.append(tool.name)
+        description = f"- {tool.name}: {tool.description}"
+        
+        # Add parameter info if available
+        if hasattr(tool, 'args_schema') and tool.args_schema:
+            try:
+                schema = tool.args_schema.schema()
+                if 'properties' in schema:
+                    params = []
+                    required = schema.get('required', [])
+                    for param_name, param_info in schema['properties'].items():
+                        param_type = param_info.get('type', 'string')
+                        param_desc = param_info.get('description', '')
+                        req_text = ' (required)' if param_name in required else ' (optional)'
+                        params.append(f"{param_name} ({param_type}){req_text}: {param_desc}")
+                    
+                    if params:
+                        description += f"\n  Parameters: {', '.join(params)}"
+            except Exception as e:
+                logger.debug(f"Could not extract schema for tool {tool.name}: {e}")
+        
+        descriptions.append(description)
+    
+    return "\n".join(descriptions)
+
+
+def get_langchain_prompt_templates() -> Dict[str, PromptTemplate]:
+    """Get all available LangChain prompt templates."""
+    return {
+        "react": create_react_prompt_template(),
+        "file_system_agent": create_file_system_agent_prompt(),
+        "chat": create_chat_prompt_template()
+    }

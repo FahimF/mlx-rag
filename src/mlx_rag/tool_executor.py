@@ -1,8 +1,8 @@
 """
-Tool execution framework for MLX-RAG agentic capabilities.
+LangChain-integrated Tool execution framework for MLX-RAG agentic capabilities.
 
-This module manages the execution of agentic tools with proper error handling,
-validation, and sandboxing to ensure secure operation.
+This module manages the execution of agentic tools using LangChain's framework
+while maintaining OpenAI API compatibility and secure operation.
 """
 
 import json
@@ -11,6 +11,14 @@ import uuid
 from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
 import asyncio
+from functools import wraps
+
+from langchain.agents import AgentExecutor, create_react_agent
+from langchain.agents.agent import Agent
+from langchain_core.prompts import PromptTemplate
+from langchain_core.tools import BaseTool
+from langchain.memory import ConversationBufferMemory
+from langchain.schema import AgentAction, AgentFinish
 
 from mlx_rag.agentic_tools import (
     AgenticTool, 
@@ -18,7 +26,10 @@ from mlx_rag.agentic_tools import (
     ReadFileTool, 
     SearchFilesTool, 
     WriteFileTool, 
-    EditFileTool
+    EditFileTool,
+    LangChainToolFactory,
+    create_langchain_tools,
+    ToolExecutionResult
 )
 
 logger = logging.getLogger(__name__)
@@ -328,3 +339,334 @@ def clear_tool_executor():
     """Clear the global tool executor instance."""
     global _global_tool_executor
     _global_tool_executor = None
+
+
+class LangChainToolExecutor:
+    """LangChain-integrated tool executor with agent capabilities."""
+    
+    def __init__(self, rag_collection_path: Optional[str] = None, use_memory: bool = False):
+        """Initialize the LangChain tool executor.
+        
+        Args:
+            rag_collection_path: Path to the RAG collection source directory
+            use_memory: Whether to use conversation memory for the agent
+        """
+        self.rag_collection_path = rag_collection_path
+        self.use_memory = use_memory
+        self._langchain_tools: List[BaseTool] = []
+        self._memory = ConversationBufferMemory(return_messages=True) if use_memory else None
+        self._agent_executor = None
+        self._initialize_tools()
+    
+    def _initialize_tools(self):
+        """Initialize LangChain tools based on the collection path."""
+        if not self.rag_collection_path:
+            logger.warning("No RAG collection path provided, LangChain tools will not be available")
+            return
+        
+        # Validate collection path exists and is accessible
+        collection_path = Path(self.rag_collection_path)
+        if not collection_path.exists():
+            logger.error(f"RAG collection path does not exist: {self.rag_collection_path}")
+            return
+        
+        if not collection_path.is_dir():
+            logger.error(f"RAG collection path is not a directory: {self.rag_collection_path}")
+            return
+        
+        try:
+            # Create LangChain tools
+            self._langchain_tools = create_langchain_tools(self.rag_collection_path)
+            logger.info(f"Initialized {len(self._langchain_tools)} LangChain tools for collection: {self.rag_collection_path}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize LangChain tools: {e}")
+            self._langchain_tools.clear()
+    
+    def get_langchain_tools(self) -> List[BaseTool]:
+        """Get the list of LangChain tools."""
+        return self._langchain_tools.copy()
+    
+    def get_tools_for_openai_request(self) -> List[Dict[str, Any]]:
+        """Get tools formatted for OpenAI chat completion request."""
+        tools = []
+        for tool in self._langchain_tools:
+            # Convert LangChain tool to OpenAI format
+            tool_def = {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
+            }
+            
+            # Extract parameters from args_schema if available
+            if hasattr(tool, 'args_schema') and tool.args_schema:
+                schema = tool.args_schema.schema()
+                if 'properties' in schema:
+                    tool_def["function"]["parameters"]["properties"] = schema['properties']
+                if 'required' in schema:
+                    tool_def["function"]["parameters"]["required"] = schema['required']
+            
+            tools.append(tool_def)
+        
+        return tools
+    
+    def create_react_agent(self, llm_wrapper=None) -> Optional[AgentExecutor]:
+        """Create a ReAct agent with the available tools.
+        
+        Args:
+            llm_wrapper: LLM wrapper for the agent (optional)
+            
+        Returns:
+            AgentExecutor if successful, None otherwise
+        """
+        if not self._langchain_tools:
+            logger.warning("No tools available for creating ReAct agent")
+            return None
+        
+        if not llm_wrapper:
+            logger.warning("No LLM wrapper provided for ReAct agent")
+            return None
+        
+        try:
+            # Create ReAct prompt template
+            react_prompt = PromptTemplate.from_template(
+                """You are a helpful assistant that can interact with files in a RAG collection.
+                
+You have access to the following tools:
+
+{tools}
+
+Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+
+Question: {input}
+Thought: {agent_scratchpad}"""
+            )
+            
+            # Create the agent
+            agent = create_react_agent(
+                llm=llm_wrapper,
+                tools=self._langchain_tools,
+                prompt=react_prompt
+            )
+            
+            # Create agent executor
+            self._agent_executor = AgentExecutor(
+                agent=agent,
+                tools=self._langchain_tools,
+                memory=self._memory,
+                verbose=True,
+                max_iterations=10,
+                handle_parsing_errors=True
+            )
+            
+            logger.info("Created ReAct agent with file system tools")
+            return self._agent_executor
+            
+        except Exception as e:
+            logger.error(f"Failed to create ReAct agent: {e}")
+            return None
+    
+    async def execute_with_agent(self, query: str, llm_wrapper=None) -> Dict[str, Any]:
+        """Execute a query using the LangChain agent.
+        
+        Args:
+            query: User query to execute
+            llm_wrapper: LLM wrapper for the agent
+            
+        Returns:
+            Dict with execution results
+        """
+        if not self._agent_executor and llm_wrapper:
+            self._agent_executor = self.create_react_agent(llm_wrapper)
+        
+        if not self._agent_executor:
+            return {
+                "success": False,
+                "error": "No agent executor available",
+                "result": None
+            }
+        
+        try:
+            logger.info(f"Executing query with LangChain agent: {query}")
+            
+            # Execute the query
+            result = await self._agent_executor.ainvoke({"input": query})
+            
+            return {
+                "success": True,
+                "result": result.get("output", ""),
+                "intermediate_steps": result.get("intermediate_steps", []),
+                "error": None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error executing query with agent: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "result": None
+            }
+    
+    def execute_single_tool(
+        self, 
+        tool_name: str, 
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Execute a single tool by name.
+        
+        Args:
+            tool_name: Name of the tool to execute
+            **kwargs: Tool arguments
+            
+        Returns:
+            Dict with execution results
+        """
+        # Find the tool
+        tool = None
+        for t in self._langchain_tools:
+            if t.name == tool_name:
+                tool = t
+                break
+        
+        if not tool:
+            return {
+                "success": False,
+                "error": f"Tool '{tool_name}' not found",
+                "result": None
+            }
+        
+        try:
+            logger.info(f"Executing single tool: {tool_name} with args: {kwargs}")
+            
+            # Execute the tool
+            result = tool.run(**kwargs)
+            
+            return {
+                "success": True,
+                "result": result,
+                "error": None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error executing tool {tool_name}: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "result": None
+            }
+    
+    async def execute_single_tool_async(
+        self, 
+        tool_name: str, 
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Execute a single tool by name asynchronously.
+        
+        Args:
+            tool_name: Name of the tool to execute
+            **kwargs: Tool arguments
+            
+        Returns:
+            Dict with execution results
+        """
+        # Find the tool
+        tool = None
+        for t in self._langchain_tools:
+            if t.name == tool_name:
+                tool = t
+                break
+        
+        if not tool:
+            return {
+                "success": False,
+                "error": f"Tool '{tool_name}' not found",
+                "result": None
+            }
+        
+        try:
+            logger.info(f"Executing single tool async: {tool_name} with args: {kwargs}")
+            
+            # Execute the tool asynchronously
+            result = await tool.arun(**kwargs)
+            
+            return {
+                "success": True,
+                "result": result,
+                "error": None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error executing tool {tool_name} async: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "result": None
+            }
+    
+    def has_available_tools(self) -> bool:
+        """Check if any tools are available for execution."""
+        return len(self._langchain_tools) > 0
+    
+    def get_collection_path(self) -> Optional[str]:
+        """Get the current RAG collection path."""
+        return self.rag_collection_path
+    
+    def update_collection_path(self, new_path: str):
+        """Update the RAG collection path and reinitialize tools.
+        
+        Args:
+            new_path: New path to the RAG collection source directory
+        """
+        logger.info(f"Updating LangChain tool executor collection path from {self.rag_collection_path} to {new_path}")
+        self.rag_collection_path = new_path
+        self._langchain_tools.clear()
+        self._agent_executor = None
+        self._initialize_tools()
+
+
+# Global instances
+_global_langchain_tool_executor: Optional[LangChainToolExecutor] = None
+
+
+def get_langchain_tool_executor(rag_collection_path: Optional[str] = None) -> LangChainToolExecutor:
+    """Get or create the global LangChain tool executor instance.
+    
+    Args:
+        rag_collection_path: Path to update the executor with (if provided)
+        
+    Returns:
+        The global LangChainToolExecutor instance
+    """
+    global _global_langchain_tool_executor
+    
+    # Create if doesn't exist
+    if _global_langchain_tool_executor is None:
+        _global_langchain_tool_executor = LangChainToolExecutor(rag_collection_path)
+    
+    # Update path if provided and different
+    elif rag_collection_path and rag_collection_path != _global_langchain_tool_executor.get_collection_path():
+        _global_langchain_tool_executor.update_collection_path(rag_collection_path)
+    
+    return _global_langchain_tool_executor
+
+
+def clear_langchain_tool_executor():
+    """Clear the global LangChain tool executor instance."""
+    global _global_langchain_tool_executor
+    _global_langchain_tool_executor = None
