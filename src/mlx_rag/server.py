@@ -962,49 +962,14 @@ def _create_system_prompt_with_tools(
     Returns:
         Comprehensive system prompt with tool guidance
     """
-    from mlx_rag.tool_prompts import generate_tool_system_prompt, generate_contextual_prompt
-    
+    from mlx_rag.tool_prompts import generate_tool_system_prompt
+
     if not tools:
         return "You are a helpful AI assistant. Provide clear, accurate, and concise responses."
-    
-    # Use contextual prompt generation if user query is available
-    if user_query:
-        return generate_contextual_prompt(tools, user_query, conversation_history)
-    else:
-        base_prompt = generate_tool_system_prompt(tools, context)
-        
-        # Add more directive instructions for tool usage
-        enhanced_prompt = base_prompt + "\n\n" + """
-## Important Tool Usage Instructions
 
-**You MUST use the available tools to complete user requests.** Do not attempt to answer questions about files, code, or project structure without first using the appropriate tools to gather information.
+    # Use a very simple prompt with just the tool definitions
+    return generate_tool_system_prompt(tools, context)
 
-**When you decide to use a tool:**
-1. Think about which tool is most appropriate for the task
-2. Make the tool call using the exact JSON format specified
-3. Wait for the tool result before proceeding
-4. Use the tool results to provide a comprehensive answer
-
-**Tool Call Format (IMPORTANT):**
-Always use this exact JSON format for tool calls:
-```json
-{"function": "tool_name", "arguments": {"parameter": "value"}}
-```
-
-**Examples of when to use tools:**
-- User asks about files or code → Use `list_directory` and `read_file`
-- User wants to find something → Use `search_files`
-- User wants to modify code → Use `read_file` first, then `edit_file`
-- User asks about project structure → Use `list_directory` with recursive=true
-
-**Remember:** Always use tools proactively. If a user's question requires information about files, code, or project structure, you MUST use the appropriate tools to get that information before responding.
-
-**For file modification requests:**
-- After reading the file, you MUST use the `edit_file` or `write_file` tool to apply the changes.
-- Do NOT output the full content of the file in your response. Instead, call the appropriate tool.
-"""
-        
-        return enhanced_prompt
 
 
 
@@ -2786,7 +2751,7 @@ def create_app() -> FastAPI:
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail="Generation failed and returned no result."
                     )
-
+                
                 # Check for tool calls in the response if tools are available
                 tool_calls = None
                 finish_reason = "stop"
@@ -2801,16 +2766,17 @@ def create_app() -> FastAPI:
                         finish_reason = "tool_calls"
                         
                         # Execute tool calls
-                        tool_results = await tool_executor.execute_tool_calls(detected_tool_calls)
+                        # tool_results = await tool_executor.execute_tool_calls(detected_tool_calls)
                         
                         # For now, we'll return the tool calls and let the client handle the next round
                         # In a full implementation, we'd continue the conversation with tool results
-                        logger.info(f"Executed {len(tool_results)} tool calls")
-
+                        # logger.info(f"Executed {len(tool_results)} tool calls")
+                        logger.info(f"Returning {len(tool_calls)} tool calls to the client for execution.")
+                
                 # Build the response message
                 response_message = ChatCompletionMessage(
                     role="assistant",
-                    content=result.text if finish_reason == "stop" else None
+                    content=result.text if finish_reason == "stop" else ""
                 )
                 
                 # Add tool calls to the message if any were detected
@@ -2841,7 +2807,7 @@ def create_app() -> FastAPI:
                         total_tokens=result.total_tokens
                     )
                 )
-
+                print(f"[DEBUG] Returning response: {response}")
                 return response
 
         except HTTPException:

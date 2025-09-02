@@ -242,10 +242,10 @@ class ToolExecutor:
             function_name = function_data.get("name")
             arguments_str = function_data.get("arguments", "{}")
             
-            # Parse arguments
+            # Parse arguments with robust JSON parsing
             try:
-                arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
-            except json.JSONDecodeError as e:
+                arguments = self._parse_arguments_robust(arguments_str) if isinstance(arguments_str, str) else arguments_str
+            except (json.JSONDecodeError, ValueError) as e:
                 logger.error(f"Failed to parse tool call arguments: {arguments_str}")
                 # Create a failed result for invalid JSON
                 async def create_error_result():
@@ -307,6 +307,112 @@ class ToolExecutor:
         self.rag_collection_path = new_path
         self._available_tools.clear()
         self._initialize_tools()
+    
+    def _parse_arguments_robust(self, arguments_str: str) -> Dict[str, Any]:
+        """Parse JSON arguments with robust handling of unescaped quotes and control characters.
+        
+        This method attempts multiple strategies to parse JSON that may contain
+        unescaped single quotes, literal newlines, or other common formatting issues.
+        
+        Args:
+            arguments_str: JSON string to parse
+            
+        Returns:
+            Parsed dictionary
+            
+        Raises:
+            json.JSONDecodeError: If all parsing strategies fail
+        """
+        import re
+        
+        # Strategy 1: Try direct JSON parsing first
+        try:
+            return json.loads(arguments_str)
+        except json.JSONDecodeError:
+            pass
+        
+        # Strategy 2: Fix literal newlines and control characters
+        try:
+            # Replace literal newlines with escaped newlines
+            fixed_str = arguments_str.replace('\n', '\\n')
+            fixed_str = fixed_str.replace('\r', '\\r')
+            fixed_str = fixed_str.replace('\t', '\\t')
+            
+            return json.loads(fixed_str)
+        except json.JSONDecodeError:
+            pass
+        
+        # Strategy 3: Fix literal newlines AND unescaped single quotes
+        try:
+            # Start with the string from Strategy 2
+            fixed_str = arguments_str.replace('\n', '\\n')
+            fixed_str = fixed_str.replace('\r', '\\r')
+            fixed_str = fixed_str.replace('\t', '\\t')
+            
+            # Find string values (content between double quotes) and escape single quotes within them
+            def escape_quotes_in_strings(match):
+                content = match.group(1)
+                # Escape single quotes that aren't already escaped
+                escaped = re.sub(r"(?<!\\\\)'", r"\\'", content)
+                return f'"{escaped}"'
+            
+            # Apply escaping to content within double quotes
+            # This regex handles escaped quotes within the string content
+            fixed_str = re.sub(r'"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"', escape_quotes_in_strings, fixed_str)
+            
+            return json.loads(fixed_str)
+        except (json.JSONDecodeError, re.error):
+            pass
+        
+        # Strategy 4: More aggressive fixing - handle various quote issues
+        try:
+            # Start with control character fixes
+            fixed = arguments_str.replace('\n', '\\n')
+            fixed = fixed.replace('\r', '\\r')
+            fixed = fixed.replace('\t', '\\t')
+            
+            # Handle cases where single quotes are used instead of double quotes for string values
+            # But be careful not to break already-quoted content
+            
+            # First, temporarily replace already-escaped single quotes to protect them
+            temp_placeholder = "__TEMP_ESCAPED_QUOTE__"
+            fixed = fixed.replace("\\'", temp_placeholder)
+            
+            # Now replace unescaped single quotes with escaped ones
+            fixed = fixed.replace("'", "\\'")            
+            
+            # Restore the originally escaped quotes
+            fixed = fixed.replace(temp_placeholder, "\\'")            
+            
+            return json.loads(fixed)
+        except (json.JSONDecodeError, re.error):
+            pass
+        
+        # Strategy 5: Try to parse as if it's a Python literal (last resort)
+        try:
+            import ast
+            # This is dangerous but might work for simple cases
+            # Convert the JSON-like string to a Python literal
+            python_like = arguments_str.replace('true', 'True').replace('false', 'False').replace('null', 'None')
+            result = ast.literal_eval(python_like)
+            if isinstance(result, dict):
+                return result
+        except (ValueError, SyntaxError):
+            pass
+        
+        # If all strategies fail, raise a descriptive error
+        # Try to identify the specific issue
+        error_details = []
+        if '\n' in arguments_str:
+            error_details.append('contains literal newlines (use \\n instead)')
+        if "'" in arguments_str:
+            error_details.append('contains unescaped single quotes')
+        
+        error_msg = f"Could not parse JSON arguments with any strategy: {arguments_str[:100]}{'...' if len(arguments_str) > 100 else ''}"
+        if error_details:
+            error_msg += f" Issues detected: {', '.join(error_details)}"
+            
+        raise json.JSONDecodeError(error_msg, arguments_str, 0)
 
 
 # Global instance for the server to use
