@@ -3,7 +3,7 @@
 Test script to replicate the exact scenario from the screenshot.
 
 From the screenshot:
-- Model: mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
+- Model: mlx-community/Mistral-7B-Instruct-v0.3-8bit
 - RAG Collection: Booker (active)
 - User query: "What is the main.dart file?"
 - Tools should be available and used
@@ -48,7 +48,7 @@ async def test_exact_scenario():
                 for model in models:
                     print(f"  - {model['name']} ({model['status']})")
                     # Look for the exact model from screenshot first
-                    if model['name'] == "Qwen3-Coder-30B-A3B-Instruct-4bit":
+                    if model['name'] == "Mistral-7B-Instruct-v0.3-8bit":
                         target_model = model
                         print(f"    ✅ Found exact model from screenshot: {model['name']} (Status: {model['status']})")
                         break
@@ -174,17 +174,111 @@ async def test_exact_scenario():
                 data = response.json()
                 print(f"📄 Response: {json.dumps(data, indent=2)}")
                 
-                # Check if the response includes tool calls
+                # Step 7: Check for tool calls and execute them
                 if 'choices' in data and len(data['choices']) > 0:
                     choice = data['choices'][0]
                     message = choice.get('message', {})
                     
                     if 'tool_calls' in message and message['tool_calls']:
                         print("✅ Response contains tool calls!")
-                        for i, tool_call in enumerate(message['tool_calls']):
-                            print(f"  Tool Call {i+1}:")
+                        
+                        original_messages = request_data["messages"]
+                        assistant_message = message
+                        
+                        # Append the assistant's response to the message history
+                        original_messages.append(assistant_message)
+
+                        tool_calls = message['tool_calls']
+                        tool_results = []
+
+                        print("\n🔧 Step 7: Executing tool calls...")
+                        for i, tool_call in enumerate(tool_calls):
+                            print(f"  Executing Tool Call {i+1}:")
                             print(f"    Function: {tool_call['function']['name']}")
                             print(f"    Arguments: {tool_call['function']['arguments']}")
+
+                            tool_request_data = {
+                                "tool_call_id": tool_call['id'],
+                                "function_name": tool_call['function']['name'],
+                                "arguments": tool_call['function']['arguments']
+                            }
+
+                            try:
+                                tool_response = await client.post(
+                                    f"{BASE_URL}/v1/tools/execute",
+                                    json=tool_request_data,
+                                    headers={"Content-Type": "application/json"}
+                                )
+
+                                if tool_response.status_code == 200:
+                                    tool_result_data = tool_response.json()
+                                    print(f"    Tool Result: {json.dumps(tool_result_data)}")
+                                    
+                                    result_content = tool_result_data.get('result', tool_result_data.get('error', ''))
+                                    if isinstance(result_content, dict) or isinstance(result_content, list):
+                                        result_content = json.dumps(result_content)
+
+                                    tool_results.append({
+                                        "tool_call_id": tool_call['id'],
+                                        "role": "tool",
+                                        "content": result_content
+                                    })
+                                else:
+                                    print(f"    ❌ Tool execution failed: {tool_response.text}")
+                                    tool_results.append({
+                                        "tool_call_id": tool_call['id'],
+                                        "role": "tool",
+                                        "content": f"Error executing tool: {tool_response.text}"
+                                    })
+                            except Exception as e:
+                                print(f"    ❌ Error executing tool: {e}")
+                                tool_results.append({
+                                    "tool_call_id": tool_call['id'],
+                                    "role": "tool",
+                                    "content": f"Exception during tool execution: {e}"
+                                })
+                        
+                        # Step 8: Send tool results back to the LLM
+                        print("\n💬 Step 8: Sending tool results back to LLM...")
+                        
+                        follow_up_messages = original_messages + tool_results
+                        
+                        follow_up_request_data = {
+                            "model": target_model['name'],
+                            "messages": follow_up_messages,
+                            "max_tokens": 2048,
+                            "temperature": 0.7
+                        }
+                        
+                        print(f"📤 Follow-up Request: {json.dumps(follow_up_request_data, indent=2)}")
+
+                        try:
+                            follow_up_response = await client.post(
+                                f"{BASE_URL}/v1/chat/completions",
+                                json=follow_up_request_data,
+                                headers={"Content-Type": "application/json"}
+                            )
+
+                            print(f"\n📥 Final Response Status: {follow_up_response.status_code}")
+
+                            if follow_up_response.status_code == 200:
+                                final_data = follow_up_response.json()
+                                print(f"📄 Final Response: {json.dumps(final_data, indent=2)}")
+                                
+                                if 'choices' in final_data and len(final_data['choices']) > 0:
+                                    final_choice = final_data['choices'][0]
+                                    final_message = final_choice.get('message', {})
+                                    if 'content' in final_message:
+                                        print("\n🎉 Final Assistant Response:")
+                                        print(final_message['content'])
+                                    else:
+                                        print("❌ No content in final response.")
+                            else:
+                                print(f"❌ Follow-up request failed: {follow_up_response.text}")
+
+                        except Exception as e:
+                            print(f"❌ Error in follow-up request: {e}")
+
                     else:
                         print("❌ No tool calls in response")
                         if 'content' in message:

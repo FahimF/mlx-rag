@@ -993,32 +993,16 @@ Always use this exact JSON format for tool calls:
 - User asks about project structure → Use `list_directory` with recursive=true
 
 **Remember:** Always use tools proactively. If a user's question requires information about files, code, or project structure, you MUST use the appropriate tools to get that information before responding.
+
+**For file modification requests:**
+- After reading the file, you MUST use the `edit_file` or `write_file` tool to apply the changes.
+- Do NOT output the full content of the file in your response. Instead, call the appropriate tool.
 """
         
         return enhanced_prompt
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager."""
-    logger.info("Starting MLX-RAG server...")
 
-    # Initialize database
-    db_manager = get_database_manager()
-    logger.info(f"Database initialized at: {db_manager.database_path}")
-
-    yield
-
-    # Cleanup
-    try:
-        # Kill everything immediately
-        from mlx_rag.model_manager import shutdown_model_manager
-        from mlx_rag.inference_queue_manager import shutdown_inference_manager
-        shutdown_inference_manager()
-        shutdown_model_manager()
-        db_manager.close()
-    except:
-        pass
 
 
 def create_app() -> FastAPI:
@@ -1026,8 +1010,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="MLX-RAG API",
         description="A lightweight RESTful wrapper around Apple's MLX engine",
-        version=__version__,
-        lifespan=lifespan,
+        version=__version__
     )
 
     # Add CORS middleware
@@ -2624,12 +2607,7 @@ def create_app() -> FastAPI:
                 # Try to get the active RAG collection for tool execution
                 active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
                 if active_collection:
-                    tool_executor = get_tool_executor(active_collection.path)
-                    
-                    # Initialize intelligent tool executor for auto-execution
-                    from mlx_rag.intelligent_tool_executor import get_intelligent_tool_executor
-                    intelligent_executor = get_intelligent_tool_executor(active_collection.path)
-                    
+                    tool_executor = get_tool_executor(active_collection.path)                                        
                     logger.info(f"Tool executor initialized with collection path: {active_collection.path}")
                 else:
                     logger.warning("Tools requested but no active RAG collection found")
