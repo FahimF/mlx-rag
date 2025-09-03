@@ -3,7 +3,7 @@
 Test script to replicate the exact scenario from the screenshot.
 
 From the screenshot:
-- Model: mlx-community/Mistral-7B-Instruct-v0.3-8bit
+- Model: mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
 - RAG Collection: Booker (active)
 - User query: "What is the main.dart file?"
 - Tools should be available and used
@@ -48,7 +48,7 @@ async def test_exact_scenario():
                 for model in models:
                     print(f"  - {model['name']} ({model['status']})")
                     # Look for the exact model from screenshot first
-                    if model['name'] == "Mistral-7B-Instruct-v0.3-8bit":
+                    if model['name'] == "Qwen3-Coder-30B-A3B-Instruct-4bit":
                         target_model = model
                         print(f"    ✅ Found exact model from screenshot: {model['name']} (Status: {model['status']})")
                         break
@@ -246,6 +246,7 @@ async def test_exact_scenario():
                         follow_up_request_data = {
                             "model": target_model['name'],
                             "messages": follow_up_messages,
+                            "tools": tools,  # Use the tools we discovered
                             "max_tokens": 2048,
                             "temperature": 0.7
                         }

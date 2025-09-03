@@ -536,11 +536,70 @@ def _parse_tool_calls_from_text(text: str) -> List[Dict[str, Any]]:
     - JSON function calls
     - XML-style tool tags
     - Structured tool call patterns
+    - Qwen3-style TOOL_CALL format
+    - Reasoning-based tool intentions (for models that use <think> tags)
+    
+    Includes aggressive early termination to prevent infinite tool call loops.
+    """
+    # AGGRESSIVE: If the text is extremely long and repetitive, truncate it early
+    if len(text) > 10000:  # If response is longer than 10k characters
+        # Count occurrences of "TOOL_CALL" to detect excessive repetition
+        tool_call_count = text.count("TOOL_CALL:")
+        if tool_call_count > 10:  # More than 10 tool calls detected
+            logger.warning(f"🚨 EMERGENCY: Detected {tool_call_count} TOOL_CALL occurrences in {len(text)} char response. Truncating to prevent infinite loop.")
+            # Find the position after the 3rd TOOL_CALL and truncate there
+            call_positions = []
+            pos = 0
+            for _ in range(4):  # Find first 4 occurrences
+                pos = text.find("TOOL_CALL:", pos)
+                if pos == -1:
+                    break
+                call_positions.append(pos)
+                pos += 1
+            
+            if len(call_positions) >= 3:
+                # Truncate after the 3rd tool call
+                truncation_point = call_positions[2] + 100  # Give some space after 3rd call
+                text = text[:truncation_point]
+                logger.warning(f"🚨 Text truncated from {len(text)} to {truncation_point} characters")
+    """Parse tool calls from LLM response text.
+    
+    This function detects tool calls in various formats:
+    - JSON function calls
+    - XML-style tool tags
+    - Structured tool call patterns
+    - Qwen3-style TOOL_CALL format
     - Reasoning-based tool intentions (for models that use <think> tags)
     """
     tool_calls = []
     
-    # Pattern 1: JSON-style function calls
+    # Pattern 1: Qwen3-style TOOL_CALL format
+    # Look for patterns like:
+    # TOOL_CALL: function_name
+    # PARAMETERS: {"key": "value"}
+    qwen_pattern = r'TOOL_CALL:\s*(\w+)\s*\n\s*PARAMETERS:\s*(\{[^}]*\})'
+    qwen_matches = re.finditer(qwen_pattern, text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+    
+    for match in qwen_matches:
+        function_name = match.group(1)
+        parameters_str = match.group(2)
+        
+        try:
+            arguments = json.loads(parameters_str)
+            tool_call = {
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": function_name,
+                    "arguments": json.dumps(arguments)
+                }
+            }
+            tool_calls.append(tool_call)
+            logger.debug(f"Parsed Qwen3 tool call: {function_name}")
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse Qwen3 parameters: {parameters_str}")
+    
+    # Pattern 2: JSON-style function calls
     # Look for patterns like: {"function": "tool_name", "arguments": {...}}
     json_pattern = r'\{\s*"function"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[^}]*\})\s*\}'
     json_matches = re.finditer(json_pattern, text, re.IGNORECASE | re.DOTALL)
@@ -564,7 +623,7 @@ def _parse_tool_calls_from_text(text: str) -> List[Dict[str, Any]]:
         except json.JSONDecodeError:
             logger.warning(f"Failed to parse JSON arguments: {arguments_str}")
     
-    # Pattern 2: XML-style tool calls
+    # Pattern 3: XML-style tool calls
     # Look for patterns like: <tool_call function="tool_name" args='{"key": "value"}'/>
     xml_pattern = r'<tool_call\s+function="([^"]+)"\s+args=\'([^\']*)\'/?>'
     xml_matches = re.finditer(xml_pattern, text, re.IGNORECASE | re.DOTALL)
@@ -588,7 +647,7 @@ def _parse_tool_calls_from_text(text: str) -> List[Dict[str, Any]]:
         except json.JSONDecodeError:
             logger.warning(f"Failed to parse XML arguments: {arguments_str}")
     
-    # Pattern 3: Function call patterns with parentheses
+    # Pattern 4: Function call patterns with parentheses
     # Look for patterns like: tool_name({"key": "value"})
     func_pattern = r'(\w+)\s*\(\s*(\{[^}]*\})\s*\)'
     func_matches = re.finditer(func_pattern, text, re.IGNORECASE | re.DOTALL)
@@ -617,17 +676,34 @@ def _parse_tool_calls_from_text(text: str) -> List[Dict[str, Any]]:
             except json.JSONDecodeError:
                 logger.warning(f"Failed to parse function arguments: {arguments_str}")
     
-    # Pattern 4: Natural language tool detection
+    # Pattern 5: Natural language tool detection (Enhanced for Qwen3-Coder-30B)
     # Look for common phrases that indicate tool usage
     if not tool_calls:
         # Look for phrases like "let me explore", "I need to find", "First, let me list", etc.
         natural_patterns = [
+            # Direct action patterns
             (r'(?:let me|I need to|I will|I should|First,? let me)\s+(?:explore|list|check)\s+(?:the\s+)?(?:directory|folder)(?:\s+structure)?', 'list_directory', '.'),
             (r'(?:let me|I need to|I will|I should|First,? let me)\s+(?:find|locate|search for)\s+(?:the\s+)?(?:main\.dart|[\w\.]+\.dart|file)', 'search_files', 'main.dart'),
             (r'(?:let me|I need to|I will|I should|First,? let me)\s+(?:read|examine|look at|check)\s+(?:the\s+)?(?:main\.dart|[\w\.]+\.dart|file)', 'read_file', 'main.dart'),
             (r'(?:explore|list|check)\s+(?:the\s+)?(?:directory|folder)(?:\s+structure)?', 'list_directory', '.'),
             (r'(?:find|locate|search for)\s+(?:the\s+)?(?:main\.dart|[\w\.]+\.dart)', 'search_files', 'main.dart'),
-            (r'(?:read|examine|look at|check)\s+(?:the\s+)?(?:main\.dart|[\w\.]+\.dart)', 'read_file', 'main.dart')
+            (r'(?:read|examine|look at|check)\s+(?:the\s+)?(?:main\.dart|[\w\.]+\.dart)', 'read_file', 'main.dart'),
+            
+            # Qwen3-specific patterns
+            (r'To\s+(?:read|examine|check)\s+(?:the\s+)?([\w\.\-/]+\.\w+)', 'read_file', None),
+            (r'(?:I\'ll|Let me)\s+(?:start by|first)\s+(?:reading|examining|checking)\s+(?:the\s+)?([\w\.\-/]+\.\w+)', 'read_file', None),
+            (r'(?:To understand|To analyze|To examine)\s+(?:the\s+)?([\w\.\-/]+\.\w+)', 'read_file', None),
+            (r'(?:I need to|I should)\s+(?:read|examine|look at)\s+(?:the\s+)?([\w\.\-/]+\.\w+)', 'read_file', None),
+            (r'(?:Reading|Examining|Checking)\s+(?:the\s+)?([\w\.\-/]+\.\w+)', 'read_file', None),
+            (r'First,?\s+(?:I\'ll|let me|I will)\s+(?:read|examine|check)\s+(?:the\s+)?([\w\.\-/]+\.\w+)', 'read_file', None),
+            
+            # Directory exploration patterns
+            (r'(?:I\'ll|Let me)\s+(?:start by|first)\s+(?:exploring|listing|checking)\s+(?:the\s+)?(?:directory|folder|structure)', 'list_directory', '.'),
+            (r'(?:explore|list|check)\s+(?:the\s+)?(?:current\s+)?(?:directory|folder)', 'list_directory', '.'),
+            
+            # Search patterns
+            (r'(?:I need to|I\'ll)\s+(?:search for|find|locate)\s+([\w\.\-/]+)', 'search_files', None),
+            (r'(?:searching for|looking for|finding)\s+([\w\.\-/]+)', 'search_files', None)
         ]
         
         for pattern, tool_name, default_arg in natural_patterns:
@@ -672,17 +748,91 @@ def _parse_tool_calls_from_text(text: str) -> List[Dict[str, Any]]:
         if not tool_calls:
             tool_calls.extend(_extract_tool_intentions_from_reasoning(text, known_tools))
     
+    # Early detection: check for excessive repetition in raw text before processing
+    if len(tool_calls) > 20:  # If we found more than 20 tool calls, likely a repetition issue
+        logger.warning(f"Detected {len(tool_calls)} tool calls, checking for repetition patterns...")
+        
+        # Count function names to detect excessive repetition
+        function_counts = {}
+        for call in tool_calls:
+            func_name = call["function"]["name"]
+            function_counts[func_name] = function_counts.get(func_name, 0) + 1
+        
+        # Check if any function appears excessively
+        max_count = max(function_counts.values()) if function_counts else 0
+        if max_count > 10:  # If any function appears more than 10 times
+            most_repeated_func = max(function_counts, key=function_counts.get)
+            logger.error(f"Detected excessive repetition: '{most_repeated_func}' appears {max_count} times. Limiting to first few calls.")
+            # Keep only the first few calls to avoid the repetition
+            tool_calls = tool_calls[:5]
+        
+        # Also check for alternating patterns in large sets
+        if len(tool_calls) > 10:
+            call_names = [call["function"]["name"] for call in tool_calls]
+            # Check if we have clear alternating pattern (A-B-A-B...)
+            if len(set(call_names[:10])) <= 2:  # Only 1-2 unique functions in first 10 calls
+                pattern_funcs = list(set(call_names[:4]))  # Get unique functions from first 4
+                if len(pattern_funcs) == 2:
+                    # Check if it's truly alternating
+                    expected_pattern = (pattern_funcs * 10)[:20]  # Create expected alternating pattern
+                    actual_pattern = call_names[:20]
+                    
+                    if actual_pattern[:len(expected_pattern)] == expected_pattern[:len(actual_pattern)]:
+                        logger.error(f"Detected clear alternating pattern: {pattern_funcs[0]} <-> {pattern_funcs[1]}. Limiting to first few calls.")
+                        # Keep just one of each to break the pattern
+                        tool_calls = tool_calls[:4]  # Keep first 4 (2 of each type)
+    
     # Remove duplicates based on function name and arguments
     seen = set()
     unique_tool_calls = []
+    call_counts = {}  # Track repetition counts
+    
     for call in tool_calls:
         call_key = (call["function"]["name"], call["function"]["arguments"])
+        
+        # Count occurrences of this specific call
+        if call_key not in call_counts:
+            call_counts[call_key] = 0
+        call_counts[call_key] += 1
+        
+        # If this call appears more than 2 times, stop processing more calls (reduced from 3)
+        if call_counts[call_key] > 2:
+            logger.error(f"Detected repetitive tool call pattern: {call['function']['name']} appears {call_counts[call_key]} times. Truncating tool call list.")
+            break
+            
         if call_key not in seen:
             seen.add(call_key)
             unique_tool_calls.append(call)
     
+    # Additional safety: limit total unique tool calls to prevent overwhelming execution
+    if len(unique_tool_calls) > 5:  # Reduced from 10 to 5
+        logger.warning(f"Too many tool calls detected ({len(unique_tool_calls)}), limiting to first 5")
+        unique_tool_calls = unique_tool_calls[:5]
+    
+    # Enhanced alternating pattern detection
+    if len(unique_tool_calls) >= 4:
+        call_names = [call["function"]["name"] for call in unique_tool_calls]
+        
+        # Check for simple A-B-A-B patterns
+        for i in range(len(call_names) - 3):
+            if call_names[i] == call_names[i + 2] and call_names[i + 1] == call_names[i + 3]:
+                logger.error(f"Detected alternating tool call pattern: {call_names[i]} <-> {call_names[i + 1]}. Truncating to first 2 calls.")
+                # Keep only the first 2 calls to break the pattern
+                unique_tool_calls = unique_tool_calls[:2]
+                break
+        
+        # Also check for A-A-B-B patterns (pairs)
+        if len(call_names) >= 4:
+            for i in range(len(call_names) - 3):
+                if (call_names[i] == call_names[i + 1] and 
+                    call_names[i + 2] == call_names[i + 3] and 
+                    call_names[i] != call_names[i + 2]):
+                    logger.error(f"Detected paired repetition pattern: {call_names[i]}-{call_names[i]} {call_names[i + 2]}-{call_names[i + 2]}. Truncating to first 2 calls.")
+                    unique_tool_calls = unique_tool_calls[:2]
+                    break
+    
     if unique_tool_calls:
-        logger.info(f"Detected {len(unique_tool_calls)} tool calls in LLM response")
+        logger.info(f"Detected {len(unique_tool_calls)} tool calls in LLM response (after filtering)")
     
     return unique_tool_calls
 
@@ -945,11 +1095,346 @@ def _check_model_supports_tools(model_path: str, model_name: str = None) -> bool
         return False
 
 
+def _check_model_supports_standard_tool_calling(model_name: str) -> bool:
+    """Check if a model supports standard OpenAI-style tool calling.
+    
+    Args:
+        model_name: Name of the model to check
+        
+    Returns:
+        True if model supports standard OpenAI tool calling, False if it needs server-side execution
+    """
+    # Models that support standard OpenAI tool calling format
+    openai_compatible_models = {
+        'gpt-4', 'gpt-3.5', 'gpt-35',
+        'claude', 'claude-3',
+        'qwen2.5-coder',  # Qwen 2.5 supports OpenAI format
+        'llama-3.1', 'llama-3.2',
+        'mistral', 'mixtral'
+    }
+    
+    model_lower = model_name.lower()
+    
+    # Check for explicit OpenAI compatibility
+    for pattern in openai_compatible_models:
+        if pattern in model_lower:
+            logger.debug(f"Model {model_name} supports standard OpenAI tool calling")
+            return True
+    
+    # Models that need server-side tool execution (like Qwen3)
+    server_side_models = {
+        'qwen3-coder',  # Qwen 3 needs server-side execution
+        'deepseek',
+        'glm',
+    }
+    
+    for pattern in server_side_models:
+        if pattern in model_lower:
+            logger.debug(f"Model {model_name} needs server-side tool execution")
+            return False
+    
+    # Default to server-side execution for unknown models
+    logger.debug(f"Model {model_name} unknown, defaulting to server-side tool execution")
+    return False
+
+
+async def _execute_tools_and_continue_conversation(
+    model: str,
+    original_messages: List[Dict[str, Any]],
+    detected_tool_calls: List[Dict[str, Any]],
+    tool_executor,
+    config: GenerationConfig,
+    max_iterations: int = 5
+) -> str:
+    """Execute tools server-side and continue conversation until final answer.
+    
+    Args:
+        model: Name of the model to use
+        original_messages: Original conversation messages
+        detected_tool_calls: Tool calls detected from model response
+        tool_executor: Tool executor instance
+        config: Generation configuration
+        max_iterations: Maximum number of tool execution iterations
+        
+    Returns:
+        Final response text from the model
+    """
+    from mlx_rag.queued_inference import queued_generate_text
+    from mlx_rag.model_manager import get_model_manager
+    import json
+    
+    model_manager = get_model_manager()
+    loaded_model = model_manager.get_model_for_inference(model)
+    
+    if not loaded_model:
+        logger.error(f"Model {model} not loaded for multi-turn tool execution")
+        return "Error: Model not available for tool execution"
+    
+    # Start with original conversation
+    conversation_history = original_messages.copy()
+    
+    # Track executed tool calls to detect loops
+    executed_calls_history = []
+    repeated_call_count = {}
+    
+    # Determine if this is a problematic model that needs more lenient loop detection
+    is_problematic_model = any(pattern in model.lower() for pattern in [
+        'qwen3', 'qwen-3', 'coder-30b', 'deepseek'
+    ])
+    
+    # Adjust thresholds based on model
+    if is_problematic_model:
+        max_repeats = 5  # More lenient for problematic models
+        min_iterations_for_pattern_check = 4  # Require more iterations before checking patterns
+        logger.info(f"Using lenient loop detection for potentially problematic model: {model}")
+    else:
+        max_repeats = 3  # Standard threshold
+        min_iterations_for_pattern_check = 3
+    
+    for iteration in range(max_iterations):
+        logger.info(f"Tool execution iteration {iteration + 1}/{max_iterations}")
+        
+        # Check for repetitive tool calls before executing
+        for tool_call in detected_tool_calls:
+            function_name = tool_call["function"]["name"]
+            arguments = tool_call["function"]["arguments"]
+            call_signature = f"{function_name}({arguments})"
+            
+            # Track repeated calls
+            if call_signature not in repeated_call_count:
+                repeated_call_count[call_signature] = 0
+            repeated_call_count[call_signature] += 1
+            
+            # If a specific call has been repeated too many times, stop
+            if repeated_call_count[call_signature] > max_repeats:
+                logger.error(f"Tool call '{call_signature}' has been repeated {repeated_call_count[call_signature]} times, breaking loop")
+                return f"I've noticed that I'm repeatedly trying the same tool call: {function_name}. Let me provide a final answer based on what I've already learned."
+        
+        # Add current tool calls to history
+        executed_calls_history.append(detected_tool_calls)
+        
+        # Check if we're in a pattern loop (same sequence of calls) - but only after enough iterations
+        if len(executed_calls_history) >= min_iterations_for_pattern_check:
+            # Check if last 2 iterations are identical - but be more lenient for problematic models
+            recent_calls_1 = [call["function"]["name"] for call in executed_calls_history[-1]]
+            recent_calls_2 = [call["function"]["name"] for call in executed_calls_history[-2]]
+            
+            # For problematic models, also check if the calls are actually making progress
+            # (e.g., read_file -> edit_file is legitimate progression)
+            if recent_calls_1 == recent_calls_2:
+                # Check if this is a legitimate workflow progression
+                legitimate_progressions = [
+                    ['list_directory', 'read_file'],
+                    ['read_file', 'edit_file'],
+                    ['search_files', 'read_file'],
+                    ['list_directory', 'search_files'],
+                    ['read_file', 'write_file']
+                ]
+                
+                is_legitimate_progression = any(
+                    set(recent_calls_1).issubset(set(progression)) or set(progression).issubset(set(recent_calls_1))
+                    for progression in legitimate_progressions
+                )
+                
+                if not is_legitimate_progression or not is_problematic_model:
+                    logger.error(f"Detected identical tool call patterns in last 2 iterations: {recent_calls_1}")
+                    return "I notice I'm repeating the same sequence of tool calls. Let me provide a final answer based on the information I've already gathered."
+                else:
+                    logger.info(f"Allowing repeated tool calls for legitimate workflow progression: {recent_calls_1}")
+            
+            # Check for alternating patterns (A-B-A-B) - only for non-problematic models or after more iterations
+            if len(executed_calls_history) >= 4 and (not is_problematic_model or len(executed_calls_history) >= 6):
+                calls_1 = [call["function"]["name"] for call in executed_calls_history[-4]]
+                calls_2 = [call["function"]["name"] for call in executed_calls_history[-3]]
+                calls_3 = [call["function"]["name"] for call in executed_calls_history[-2]]
+                calls_4 = [call["function"]["name"] for call in executed_calls_history[-1]]
+                
+                if calls_1 == calls_3 and calls_2 == calls_4:
+                    logger.error(f"Detected alternating tool call pattern: {calls_1} <-> {calls_2}")
+                    return "I notice I'm alternating between the same tool calls without making progress. Let me provide a final answer with the information I have."
+        
+        # Execute detected tool calls
+        try:
+            tool_results = await tool_executor.execute_tool_calls(detected_tool_calls)
+        except Exception as e:
+            logger.error(f"Tool execution failed: {e}")
+            return f"I encountered an error while executing tools: {str(e)}"
+        
+        if not tool_results:
+            logger.warning("No tool results returned")
+            return "I couldn't execute the requested tools."
+        
+        # Add tool results to conversation
+        for i, (tool_call, result) in enumerate(zip(detected_tool_calls, tool_results)):
+            function_name = tool_call["function"]["name"]
+            
+            if result.success:
+                tool_message = {
+                    "role": "user",
+                    "content": f"Tool '{function_name}' result: {result.result}"
+                }
+            else:
+                tool_message = {
+                    "role": "user",  
+                    "content": f"Tool '{function_name}' failed: {result.error}"
+                }
+            
+            conversation_history.append(tool_message)
+            logger.debug(f"Added tool result {i+1} to conversation")
+        
+        # Generate model response with tool results
+        try:
+            # Add more specific instruction to encourage final answer
+            if iteration >= 2:  # After 2 iterations, be more insistent
+                instruction = "You have sufficient information from the tool results. Please provide your final answer now without making additional tool calls."
+            else:
+                instruction = "Based on the tool results above, please provide your final answer to the original question."
+                
+            conversation_history.append({
+                "role": "user",
+                "content": instruction
+            })
+            
+            # Format conversation for the model
+            prompt_string = await _apply_chat_template(
+                loaded_model.mlx_wrapper.tokenizer, 
+                conversation_history, 
+                model
+            )
+            
+            # Generate response
+            result = await queued_generate_text(model, prompt_string, config)
+            
+            if not result or not result.text:
+                logger.error("No response from model after tool execution")
+                return "I was unable to generate a response after executing the tools."
+            
+            # Check if the model wants to make more tool calls
+            new_tool_calls = _parse_tool_calls_from_text(result.text)
+            
+            if new_tool_calls:
+                logger.info(f"Model wants to execute {len(new_tool_calls)} more tools in iteration {iteration + 1}")
+                
+                # Additional loop protection: limit total tool calls
+                total_calls_so_far = sum(len(calls) for calls in executed_calls_history)
+                if total_calls_so_far >= 15:  # Maximum 15 total tool calls
+                    logger.error(f"Reached maximum total tool calls ({total_calls_so_far}), stopping")
+                    return "I've executed many tool calls and should now provide a final answer based on the gathered information."
+                
+                detected_tool_calls = new_tool_calls
+                
+                # Add model's intermediate response to conversation
+                conversation_history.append({
+                    "role": "assistant",
+                    "content": result.text
+                })
+                
+                # Continue to next iteration
+                continue
+            else:
+                # Model provided final answer
+                logger.info(f"Multi-turn tool execution completed after {iteration + 1} iterations")
+                return result.text
+                
+        except Exception as e:
+            logger.error(f"Error in conversation iteration {iteration + 1}: {e}")
+            return f"I encountered an error while processing the tool results: {str(e)}"
+    
+    # If we reach max iterations, return the last response
+    logger.warning(f"Reached maximum iterations ({max_iterations}) for tool execution")
+    return "I've executed the requested tools but reached the maximum number of iterations. Please try breaking down your request into smaller parts."
+
+
+async def _generate_with_early_tool_stopping(
+    model_name: str,
+    prompt: str,
+    config: GenerationConfig,
+    loaded_model
+) -> Any:
+    """Generate text with ultra-early stopping for problematic tool-calling models.
+    
+    This function monitors generation token-by-token and stops immediately when
+    it detects the start of repetitive tool calls, while preserving valid tool calls.
+    """
+    from mlx_rag.queued_inference import queued_generate_text
+    
+    logger.info(f"🛡️ Using early tool stopping for {model_name}")
+    
+    # Start generation
+    accumulated_text = ""
+    tool_call_count = 0
+    consecutive_tool_calls = 0
+    last_tool_call_pos = -1
+    last_complete_tool_call = -1
+    
+    try:
+        # Use streaming generation to monitor token-by-token
+        async for chunk in loaded_model.mlx_wrapper.generate_stream(prompt, config):
+            accumulated_text += chunk
+            
+            # Check for TOOL_CALL patterns as soon as they appear
+            current_tool_calls = accumulated_text.count("TOOL_CALL:")
+            
+            if current_tool_calls > tool_call_count:
+                # New tool call detected
+                tool_call_count = current_tool_calls
+                
+                # Find position of latest tool call
+                latest_pos = accumulated_text.rfind("TOOL_CALL:")
+                
+                # Check if this is close to the previous one (consecutive)
+                if last_tool_call_pos != -1 and (latest_pos - last_tool_call_pos) < 300:
+                    consecutive_tool_calls += 1
+                else:
+                    consecutive_tool_calls = 1
+                
+                last_tool_call_pos = latest_pos
+                
+                logger.info(f"🛡️ Tool call #{tool_call_count} detected at position {latest_pos}, consecutive: {consecutive_tool_calls}")
+                
+                # More lenient stopping: Allow up to 3 tool calls before stopping
+                if tool_call_count >= 3 or consecutive_tool_calls >= 3:
+                    logger.warning(f"🛡️ EARLY STOP: {tool_call_count} tool calls, {consecutive_tool_calls} consecutive - stopping generation")
+                    break
+            
+            # Look for complete tool call patterns (TOOL_CALL: + PARAMETERS:)
+            if "PARAMETERS:" in accumulated_text:
+                # Count complete tool call pairs
+                complete_calls = accumulated_text.count("TOOL_CALL:") if "PARAMETERS:" in accumulated_text else 0
+                if complete_calls > last_complete_tool_call:
+                    last_complete_tool_call = complete_calls
+                    logger.info(f"🛡️ Complete tool call pattern #{complete_calls} detected")
+            
+            # Allow longer responses to capture complete tool calls
+            if len(accumulated_text) > 3000:  # Increased limit to allow complete tool calls
+                logger.warning(f"🛡️ EARLY STOP: Response length {len(accumulated_text)} exceeded limit - stopping generation")
+                break
+        
+        # Create a mock result object similar to queued_generate_text
+        class MockResult:
+            def __init__(self, text: str):
+                self.text = text
+                self.prompt_tokens = len(prompt.split())
+                self.completion_tokens = len(text.split())
+                self.total_tokens = self.prompt_tokens + self.completion_tokens
+                self.generation_time_seconds = 1.0
+                self.tokens_per_second = self.completion_tokens / self.generation_time_seconds
+        
+        logger.info(f"🛡️ Early stopping generation completed: {len(accumulated_text)} chars, {tool_call_count} tool calls")
+        return MockResult(accumulated_text)
+        
+    except Exception as e:
+        logger.error(f"🛡️ Error in early stopping generation: {e}")
+        # Fallback to normal generation
+        return await queued_generate_text(model_name, prompt, config)
+
+
 def _create_system_prompt_with_tools(
     tools: List[Dict[str, Any]], 
     context: Optional[str] = None,
     user_query: Optional[str] = None,
-    conversation_history: Optional[List[Dict[str, str]]] = None
+    conversation_history: Optional[List[Dict[str, str]]] = None,
+    collection_path: Optional[str] = None
 ) -> str:
     """Create a comprehensive system prompt that instructs the LLM on how to use tools.
     
@@ -958,6 +1443,7 @@ def _create_system_prompt_with_tools(
         context: Optional context about the current task or domain  
         user_query: Optional user query for contextual prompt generation
         conversation_history: Optional conversation history for context
+        collection_path: Optional path to the RAG collection (prevents hallucination)
         
     Returns:
         Comprehensive system prompt with tool guidance
@@ -967,8 +1453,17 @@ def _create_system_prompt_with_tools(
     if not tools:
         return "You are a helpful AI assistant. Provide clear, accurate, and concise responses."
 
-    # Use a very simple prompt with just the tool definitions
-    return generate_tool_system_prompt(tools, context)
+    # Build enhanced context with collection path information
+    enhanced_context = context or ""
+    
+    if collection_path:
+        path_context = f"\n\nIMPORTANT: You are working with a RAG collection located at: {collection_path}\n"
+        path_context += f"When using tools, all paths should be relative to this collection directory.\n"
+        path_context += f"Do not use made-up or hallucinated paths. Only use real paths that exist within: {collection_path}\n"
+        enhanced_context += path_context
+
+    # Use the enhanced context
+    return generate_tool_system_prompt(tools, enhanced_context)
 
 
 
@@ -1165,187 +1660,187 @@ def create_app() -> FastAPI:
         response = rag_manager.query(query, active_collection.name)
         return {"query": query, "response": response}
 
-    @app.get("/v1/tools")
-    async def get_available_tools(
-        use_langchain: bool = False,
-        db: Session = Depends(get_db_session)
-    ):
-        """Get available tools for the active RAG collection."""
-        try:
-            # Get the active RAG collection
-            active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
+    # @app.get("/v1/tools")
+    # async def get_available_tools(
+    #     use_langchain: bool = False,
+    #     db: Session = Depends(get_db_session)
+    # ):
+    #     """Get available tools for the active RAG collection."""
+    #     try:
+    #         # Get the active RAG collection
+    #         active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
             
-            if not active_collection:
-                return {"tools": [], "system": "original"}
+    #         if not active_collection:
+    #             return {"tools": [], "system": "original"}
             
-            if use_langchain:
-                # Use LangChain tool executor
-                langchain_executor = get_langchain_tool_executor(active_collection.path)
+    #         if use_langchain:
+    #             # Use LangChain tool executor
+    #             langchain_executor = get_langchain_tool_executor(active_collection.path)
                 
-                if not langchain_executor.has_available_tools():
-                    return {"tools": [], "system": "langchain"}
+    #             if not langchain_executor.has_available_tools():
+    #                 return {"tools": [], "system": "langchain"}
                 
-                # Get tools in OpenAI format from LangChain
-                tools = langchain_executor.get_openai_tool_definitions()
+    #             # Get tools in OpenAI format from LangChain
+    #             tools = langchain_executor.get_openai_tool_definitions()
                 
-                return {
-                    "tools": tools, 
-                    "system": "langchain",
-                    "tool_count": len(tools),
-                    "collection_path": active_collection.path
-                }
-            else:
-                # Use original tool executor
-                tool_executor = get_tool_executor(active_collection.path)
+    #             return {
+    #                 "tools": tools, 
+    #                 "system": "langchain",
+    #                 "tool_count": len(tools),
+    #                 "collection_path": active_collection.path
+    #             }
+    #         else:
+    #             # Use original tool executor
+    #             tool_executor = get_tool_executor(active_collection.path)
                 
-                if not tool_executor.has_available_tools():
-                    return {"tools": [], "system": "original"}
+    #             if not tool_executor.has_available_tools():
+    #                 return {"tools": [], "system": "original"}
                 
-                # Get tools in OpenAI format
-                tools = tool_executor.get_tools_for_openai_request()
+    #             # Get tools in OpenAI format
+    #             tools = tool_executor.get_tools_for_openai_request()
                 
-                return {
-                    "tools": tools,
-                    "system": "original", 
-                    "tool_count": len(tools),
-                    "collection_path": active_collection.path
-                }
+    #             return {
+    #                 "tools": tools,
+    #                 "system": "original", 
+    #                 "tool_count": len(tools),
+    #                 "collection_path": active_collection.path
+    #             }
             
-        except Exception as e:
-            logger.error(f"Error getting available tools: {e}")
-            return {"tools": [], "error": str(e)}
+    #     except Exception as e:
+    #         logger.error(f"Error getting available tools: {e}")
+    #         return {"tools": [], "error": str(e)}
 
-    @app.post("/v1/tools/execute")
-    async def execute_tool(
-        request: dict,
-        use_langchain: bool = False,
-        db: Session = Depends(get_db_session)
-    ):
-        """Execute a tool call."""
-        try:
-            # Get the active RAG collection
-            active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
+    # @app.post("/v1/tools/execute")
+    # async def execute_tool(
+    #     request: dict,
+    #     use_langchain: bool = False,
+    #     db: Session = Depends(get_db_session)
+    # ):
+    #     """Execute a tool call."""
+    #     try:
+    #         # Get the active RAG collection
+    #         active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
             
-            if not active_collection:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="No active RAG collection for tool execution"
-                )
+    #         if not active_collection:
+    #             raise HTTPException(
+    #                 status_code=status.HTTP_400_BAD_REQUEST,
+    #                 detail="No active RAG collection for tool execution"
+    #             )
             
-            # Extract tool call details
-            function_name = request.get("function_name")
-            arguments_str = request.get("arguments", "{}")
-            tool_call_id = request.get("tool_call_id")
+    #         # Extract tool call details
+    #         function_name = request.get("function_name")
+    #         arguments_str = request.get("arguments", "{}")
+    #         tool_call_id = request.get("tool_call_id")
             
-            if not function_name:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="function_name is required"
-                )
+    #         if not function_name:
+    #             raise HTTPException(
+    #                 status_code=status.HTTP_400_BAD_REQUEST,
+    #                 detail="function_name is required"
+    #             )
             
-            # Parse arguments
-            try:
-                if isinstance(arguments_str, str):
-                    arguments = json.loads(arguments_str)
-                else:
-                    arguments = arguments_str
-            except json.JSONDecodeError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid JSON in arguments: {e}"
-                )
+    #         # Parse arguments
+    #         try:
+    #             if isinstance(arguments_str, str):
+    #                 arguments = json.loads(arguments_str)
+    #             else:
+    #                 arguments = arguments_str
+    #         except json.JSONDecodeError as e:
+    #             raise HTTPException(
+    #                 status_code=status.HTTP_400_BAD_REQUEST,
+    #                 detail=f"Invalid JSON in arguments: {e}"
+    #             )
             
-            if use_langchain:
-                # Use LangChain tool executor
-                langchain_executor = get_langchain_tool_executor(active_collection.path)
+    #         if use_langchain:
+    #             # Use LangChain tool executor
+    #             langchain_executor = get_langchain_tool_executor(active_collection.path)
                 
-                if not langchain_executor.has_available_tools():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="No LangChain tools available for execution"
-                    )
+    #             if not langchain_executor.has_available_tools():
+    #                 raise HTTPException(
+    #                     status_code=status.HTTP_400_BAD_REQUEST,
+    #                     detail="No LangChain tools available for execution"
+    #                 )
                 
-                # Create tool call in the expected format
-                tool_call = {
-                    "id": tool_call_id or f"call_{uuid.uuid4().hex[:8]}",
-                    "type": "function",
-                    "function": {
-                        "name": function_name,
-                        "arguments": json.dumps(arguments)
-                    }
-                }
+    #             # Create tool call in the expected format
+    #             tool_call = {
+    #                 "id": tool_call_id or f"call_{uuid.uuid4().hex[:8]}",
+    #                 "type": "function",
+    #                 "function": {
+    #                     "name": function_name,
+    #                     "arguments": json.dumps(arguments)
+    #                 }
+    #             }
                 
-                # Execute using LangChain
-                results = await langchain_executor.execute_multiple_tool_calls_async([tool_call])
+    #             # Execute using LangChain
+    #             results = await langchain_executor.execute_multiple_tool_calls_async([tool_call])
                 
-                if not results:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="LangChain tool execution failed - no results returned"
-                    )
+    #             if not results:
+    #                 raise HTTPException(
+    #                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    #                     detail="LangChain tool execution failed - no results returned"
+    #                 )
                 
-                # Return the first result
-                result = results[0]
+    #             # Return the first result
+    #             result = results[0]
                 
-                # Return in a format that's easy for the frontend to use
-                return {
-                    "success": result.success,
-                    "result": result.result,
-                    "error": result.error,
-                    "tool_call_id": tool_call_id,
-                    "function_name": function_name,
-                    "system": "langchain"
-                }
-            else:
-                # Use original tool executor
-                tool_executor = get_tool_executor(active_collection.path)
+    #             # Return in a format that's easy for the frontend to use
+    #             return {
+    #                 "success": result.success,
+    #                 "result": result.result,
+    #                 "error": result.error,
+    #                 "tool_call_id": tool_call_id,
+    #                 "function_name": function_name,
+    #                 "system": "langchain"
+    #             }
+    #         else:
+    #             # Use original tool executor
+    #             tool_executor = get_tool_executor(active_collection.path)
                 
-                if not tool_executor.has_available_tools():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="No tools available for execution"
-                    )
+    #             if not tool_executor.has_available_tools():
+    #                 raise HTTPException(
+    #                     status_code=status.HTTP_400_BAD_REQUEST,
+    #                     detail="No tools available for execution"
+    #                 )
                 
-                # Create tool call in the expected format
-                tool_call = {
-                    "id": tool_call_id or f"call_{uuid.uuid4().hex[:8]}",
-                    "type": "function",
-                    "function": {
-                        "name": function_name,
-                        "arguments": json.dumps(arguments)
-                    }
-                }
+    #             # Create tool call in the expected format
+    #             tool_call = {
+    #                 "id": tool_call_id or f"call_{uuid.uuid4().hex[:8]}",
+    #                 "type": "function",
+    #                 "function": {
+    #                     "name": function_name,
+    #                     "arguments": json.dumps(arguments)
+    #                 }
+    #             }
                 
-                # Execute the tool call
-                results = await tool_executor.execute_tool_calls([tool_call])
+    #             # Execute the tool call
+    #             results = await tool_executor.execute_tool_calls([tool_call])
                 
-                if not results:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="Tool execution failed - no results returned"
-                    )
+    #             if not results:
+    #                 raise HTTPException(
+    #                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    #                     detail="Tool execution failed - no results returned"
+    #                 )
                 
-                # Return the first result
-                result = results[0]
+    #             # Return the first result
+    #             result = results[0]
                 
-                # Return in a format that's easy for the frontend to use
-                return {
-                    "success": result.success,
-                    "result": result.result,
-                    "error": result.error,
-                    "tool_call_id": tool_call_id,
-                    "function_name": function_name,
-                    "system": "original"
-                }
+    #             # Return in a format that's easy for the frontend to use
+    #             return {
+    #                 "success": result.success,
+    #                 "result": result.result,
+    #                 "error": result.error,
+    #                 "tool_call_id": tool_call_id,
+    #                 "function_name": function_name,
+    #                 "system": "original"
+    #             }
             
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Error executing tool: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Tool execution failed: {str(e)}"
-            )
+    #     except HTTPException:
+    #         raise
+    #     except Exception as e:
+    #         logger.error(f"Error executing tool: {e}")
+    #         raise HTTPException(
+    #             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    #             detail=f"Tool execution failed: {str(e)}"
+    #         )
 
     # Chat session management endpoints
     @app.get("/v1/chat/sessions")
@@ -2677,7 +3172,11 @@ def create_app() -> FastAPI:
                 if has_tools and tool_executor and tool_executor.has_available_tools():
                     # Create system prompt with tool instructions
                     tools_list = [tool.model_dump() for tool in request.tools]
-                    system_content = _create_system_prompt_with_tools(tools_list)
+                    collection_path = active_collection.path if active_collection else None
+                    system_content = _create_system_prompt_with_tools(
+                        tools_list, 
+                        collection_path=collection_path
+                    )
                     default_system = ChatCompletionMessage(
                         role="system",
                         content=system_content
@@ -2701,14 +3200,32 @@ def create_app() -> FastAPI:
                     detail=f"max_tokens cannot exceed {MAX_TOKENS_LIMIT}, requested {request.max_tokens}"
                 )
 
-            # Create generation config
+            # Create generation config with aggressive repetition prevention
             logger.debug(f"Creating config - Images: {len(images)}")
+            
+            # For models known to have tool call repetition issues, apply strict limits
+            is_problematic_model = any(pattern in request.model.lower() for pattern in [
+                'qwen3', 'qwen-3', 'coder-30b', 'deepseek'
+            ])
+            
+            if is_problematic_model:
+                logger.warning(f"Applying strict generation limits for potentially problematic model: {request.model}")
+                # Ultra-aggressive settings for problematic models
+                max_tokens = min(request.max_tokens, 512)  # Even more restrictive - 512 tokens
+                temperature = min(request.temperature, 0.1)  # Very low temperature for deterministic output
+                repetition_penalty = max(request.repetition_penalty or 1.0, 1.5)  # Very strong repetition penalty
+            else:
+                max_tokens = request.max_tokens
+                temperature = request.temperature
+                repetition_penalty = request.repetition_penalty
+            
             config = GenerationConfig(
-                max_tokens=request.max_tokens,
-                temperature=request.temperature,
+                max_tokens=max_tokens,
+                temperature=temperature,
                 top_p=request.top_p,
                 top_k=request.top_k,
-                repetition_penalty=request.repetition_penalty,
+                repetition_penalty=repetition_penalty,
+                repetition_context_size=100,  # Large context window for repetition detection
                 seed=request.seed
             )
             logger.debug(f"Config created - Images: {len(images)}")
@@ -2729,6 +3246,10 @@ def create_app() -> FastAPI:
             logger.debug(f"🔧 Request stream setting: {request.stream} (forcing non-streaming)")
 
             # Always use non-streaming response (streaming disabled)
+            # Add generation timeout for problematic models
+            generation_timeout = 30 if is_problematic_model else 120  # 30s for problematic models, 2min for others
+            logger.info(f"Using generation timeout: {generation_timeout}s for model {request.model}")
+            
             if is_vision_model:
                 # For vision models, process images and pass structured messages
                 processed_image_paths = await _process_image_urls(images)
@@ -2744,7 +3265,43 @@ def create_app() -> FastAPI:
             else:
                 # For text models, format to a string and generate
                 prompt_string = await _apply_chat_template(loaded_model.mlx_wrapper.tokenizer, chat_messages, request.model)
-                result = await queued_generate_text(request.model, prompt_string, config)
+                
+                # Add explicit stop sequences and custom generation logic for problematic models
+                if has_tools and is_problematic_model:
+                    # Add strong stop instruction
+                    stop_instruction = "\n\nCRITICAL: Use EXACTLY ONE tool call. Do not repeat. Stop after the first tool call."
+                    prompt_string += stop_instruction
+                    logger.info(f"Added ultra-strict repetition prevention instruction for {request.model}")
+                    
+                    # For problematic models, use custom generation with early stopping
+                    logger.info(f"Using custom generation with early stopping for {request.model}")
+                    try:
+                        import asyncio
+                        result = await asyncio.wait_for(
+                            _generate_with_early_tool_stopping(request.model, prompt_string, config, loaded_model),
+                            timeout=generation_timeout
+                        )
+                    except asyncio.TimeoutError:
+                        logger.error(f"Custom generation timeout ({generation_timeout}s) exceeded for {request.model}")
+                        raise HTTPException(
+                            status_code=status.HTTP_408_REQUEST_TIMEOUT,
+                            detail=f"Model generation took too long (>{generation_timeout}s). This may indicate repetitive output."
+                        )
+                else:
+                    # Normal generation for non-problematic models
+                    try:
+                        import asyncio
+                        result = await asyncio.wait_for(
+                            queued_generate_text(request.model, prompt_string, config),
+                            timeout=generation_timeout
+                        )
+                    except asyncio.TimeoutError:
+                        logger.error(f"Generation timeout ({generation_timeout}s) exceeded for {request.model}")
+                        raise HTTPException(
+                            status_code=status.HTTP_408_REQUEST_TIMEOUT,
+                            detail=f"Model generation took too long (>{generation_timeout}s). This may indicate repetitive output."
+                        )
+                
 
                 if not result:
                      raise HTTPException(
@@ -2755,28 +3312,86 @@ def create_app() -> FastAPI:
                 # Check for tool calls in the response if tools are available
                 tool_calls = None
                 finish_reason = "stop"
+                final_response_text = result.text
                 
                 if has_tools and tool_executor and tool_executor.has_available_tools():
-                    # Parse tool calls from the LLM response
-                    detected_tool_calls = _parse_tool_calls_from_text(result.text)
+                    # Log the raw response text for debugging
+                    logger.info(f"🔧 [TOOL-DEBUG] Raw model response length: {len(result.text)} characters")
+                    logger.info(f"🔧 [TOOL-DEBUG] Response preview: {repr(result.text[:500])}")
+                    
+                    # EMERGENCY: Truncate extremely long responses with repetitive tool calls BEFORE parsing
+                    # More aggressive thresholds for problematic models
+                    response_text = result.text
+                    length_threshold = 2000 if is_problematic_model else 5000
+                    call_threshold = 3 if is_problematic_model else 5
+                    
+                    if len(response_text) > length_threshold:
+                        tool_call_count = response_text.count("TOOL_CALL:")
+                        if tool_call_count > call_threshold:
+                            logger.error(f"🚨 EMERGENCY TRUNCATION: {tool_call_count} TOOL_CALLs in {len(response_text)} chars - truncating to prevent hang")
+                            
+                            # For problematic models, keep only 2 tool calls
+                            max_calls_to_keep = 2 if is_problematic_model else 3
+                            
+                            # Find positions of first few tool calls
+                            truncation_pos = 0
+                            for i in range(max_calls_to_keep):
+                                pos = response_text.find("TOOL_CALL:", truncation_pos)
+                                if pos == -1:
+                                    break
+                                truncation_pos = pos + 1
+                            
+                            # Find the end of the Nth tool call (look for next TOOL_CALL or end)
+                            next_call_pos = response_text.find("TOOL_CALL:", truncation_pos + 100)
+                            if next_call_pos != -1:
+                                response_text = response_text[:next_call_pos]
+                            else:
+                                response_text = response_text[:truncation_pos + 200]  # Keep some extra chars
+                            
+                            logger.error(f"🚨 Response truncated from {len(result.text)} to {len(response_text)} characters")
+                            logger.error(f"🚨 Truncated response preview: {repr(response_text[-200:])}")
+                    
+                    # Parse tool calls from the (possibly truncated) response
+                    detected_tool_calls = _parse_tool_calls_from_text(response_text)
                     
                     if detected_tool_calls:
-                        logger.info(f"Detected {len(detected_tool_calls)} tool calls in response")
-                        tool_calls = detected_tool_calls
-                        finish_reason = "tool_calls"
+                        logger.info(f"🔧 [TOOL-DEBUG] Detected {len(detected_tool_calls)} tool calls after parsing")
+                        for i, call in enumerate(detected_tool_calls[:5]):
+                            logger.info(f"🔧 [TOOL-DEBUG] Call {i+1}: {call['function']['name']} with args {call['function']['arguments']}")
                         
-                        # Execute tool calls
-                        # tool_results = await tool_executor.execute_tool_calls(detected_tool_calls)
+                        # Check if this model supports standard OpenAI tool calling
+                        model_supports_openai_tools = _check_model_supports_standard_tool_calling(request.model)
+                        logger.info(f"🔧 [TOOL-DEBUG] Model {request.model} supports OpenAI tools: {model_supports_openai_tools}")
                         
-                        # For now, we'll return the tool calls and let the client handle the next round
-                        # In a full implementation, we'd continue the conversation with tool results
-                        # logger.info(f"Executed {len(tool_results)} tool calls")
-                        logger.info(f"Returning {len(tool_calls)} tool calls to the client for execution.")
+                        if model_supports_openai_tools:
+                            # Standard OpenAI flow - return tool calls to client
+                            tool_calls = detected_tool_calls
+                            finish_reason = "tool_calls"
+                            final_response_text = ""  # Clear content for tool_calls response
+                            logger.info(f"Returning {len(tool_calls)} tool calls to client (OpenAI format)")
+                        else:
+                            # Multi-turn execution for models like Qwen3 that need results immediately
+                            logger.info(f"🔧 [TOOL-DEBUG] Executing tools server-side for model {request.model}")
+                            
+                            # Execute tools and continue conversation until final answer
+                            final_response_text = await _execute_tools_and_continue_conversation(
+                                model=request.model,
+                                original_messages=chat_messages,
+                                detected_tool_calls=detected_tool_calls,
+                                tool_executor=tool_executor,
+                                config=config,
+                                max_iterations=5  # Prevent infinite loops
+                            )
+                            
+                            finish_reason = "stop"
+                            logger.info(f"🔧 [TOOL-DEBUG] Multi-turn tool execution completed for {request.model}")
+                    else:
+                        logger.info(f"🔧 [TOOL-DEBUG] No tool calls detected in response")
                 
                 # Build the response message
                 response_message = ChatCompletionMessage(
                     role="assistant",
-                    content=result.text if finish_reason == "stop" else ""
+                    content=final_response_text if finish_reason == "stop" else ""
                 )
                 
                 # Add tool calls to the message if any were detected
