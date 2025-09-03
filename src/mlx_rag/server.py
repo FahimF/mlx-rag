@@ -28,12 +28,6 @@ from mlx_rag.rag_manager import get_rag_manager
 from mlx_rag.mlx_integration import GenerationConfig, get_inference_engine
 from mlx_rag.inference_queue_manager import get_inference_manager, QueuedRequest
 from mlx_rag.queued_inference import queued_generate_text, queued_generate_text_stream, queued_transcribe_audio, queued_generate_speech, queued_generate_embeddings, queued_generate_vision
-from mlx_rag.tool_executor import (
-    get_tool_executor, 
-    get_langchain_tool_executor, 
-    ToolExecutionResult,
-    LangChainToolExecutor
-)
 from mlx_rag import __version__
 import re
 
@@ -3090,14 +3084,11 @@ def create_app() -> FastAPI:
         db: Session = Depends(get_db_session),
         api_key: Optional[str] = Depends(validate_api_key)
     ):
+        # Print request for debug purposes
+        print(f"[DEBUG] Chat request: {request}")
+        
         """OpenAI-compatible chat completions endpoint."""
         try:
-            # Log API key usage (for debugging)
-            if api_key:
-                logger.debug(f"API key provided: {api_key[:8]}...")
-            else:
-                logger.debug("No API key provided")
-
             # Check if model exists in database
             model_record = db.query(Model).filter(Model.name == request.model).first()
             if not model_record:
@@ -3131,35 +3122,8 @@ def create_app() -> FastAPI:
                         detail=f"Model '{request.model}' failed to load properly"
                     )
 
-            # Check if tools are provided
-            has_tools = request.tools is not None and len(request.tools) > 0
-            tool_executor = None
-            intelligent_executor = None
-            
-            # Initialize tool executor if tools are requested
-            if has_tools:
-                # Try to get the active RAG collection for tool execution
-                active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
-                if active_collection:
-                    tool_executor = get_tool_executor(active_collection.path)                                        
-                    logger.info(f"Tool executor initialized with collection path: {active_collection.path}")
-                else:
-                    logger.warning("Tools requested but no active RAG collection found")
-                    
-            # Disable auto-execution of tools to allow normal tool calling flow
-            # The intelligent tool executor was interfering with the model's natural tool calling
-            tool_results = []
-            auto_context = ""
-            
-            # Get messages from request early for tool analysis
+            # Get messages
             messages = request.messages
-            
-            # DISABLED: Intelligent tool auto-execution
-            # This was causing tools to be executed before the model could make tool calls,
-            # which interfered with the normal OpenAI tool calling flow.
-            # The model should make tool calls itself, not have them pre-executed.
-            
-            logger.debug(f"Intelligent tool executor disabled - allowing normal tool calling flow")
 
             # Add default system prompt if none provided
             has_system_message = any(msg.role == "system" for msg in messages)
@@ -3169,24 +3133,11 @@ def create_app() -> FastAPI:
 
             # Only add system message if no system message exists AND no images (vision models don't handle system messages well)
             if not has_system_message and not images:
-                if has_tools and tool_executor and tool_executor.has_available_tools():
-                    # Create system prompt with tool instructions
-                    tools_list = [tool.model_dump() for tool in request.tools]
-                    collection_path = active_collection.path if active_collection else None
-                    system_content = _create_system_prompt_with_tools(
-                        tools_list, 
-                        collection_path=collection_path
-                    )
-                    default_system = ChatCompletionMessage(
-                        role="system",
-                        content=system_content
-                    )
-                else:
-                    # Add a helpful default system message for non-vision models
-                    default_system = ChatCompletionMessage(
-                        role="system",
-                        content="You are a helpful AI assistant. Provide clear, accurate, and concise responses."
-                    )
+                # Add a helpful default system message for non-vision models
+                default_system = ChatCompletionMessage(
+                    role="system",
+                    content="You are a helpful AI assistant. Provide clear, accurate, and concise responses."
+                )
                 messages = [default_system] + list(messages)
                 # Re-extract after adding system message
                 chat_messages, images = _format_chat_prompt(messages)
@@ -3203,21 +3154,9 @@ def create_app() -> FastAPI:
             # Create generation config with aggressive repetition prevention
             logger.debug(f"Creating config - Images: {len(images)}")
             
-            # For models known to have tool call repetition issues, apply strict limits
-            is_problematic_model = any(pattern in request.model.lower() for pattern in [
-                'qwen3', 'qwen-3', 'coder-30b', 'deepseek'
-            ])
-            
-            if is_problematic_model:
-                logger.warning(f"Applying strict generation limits for potentially problematic model: {request.model}")
-                # Ultra-aggressive settings for problematic models
-                max_tokens = min(request.max_tokens, 512)  # Even more restrictive - 512 tokens
-                temperature = min(request.temperature, 0.1)  # Very low temperature for deterministic output
-                repetition_penalty = max(request.repetition_penalty or 1.0, 1.5)  # Very strong repetition penalty
-            else:
-                max_tokens = request.max_tokens
-                temperature = request.temperature
-                repetition_penalty = request.repetition_penalty
+            max_tokens = request.max_tokens
+            temperature = request.temperature
+            repetition_penalty = request.repetition_penalty
             
             config = GenerationConfig(
                 max_tokens=max_tokens,
@@ -3243,12 +3182,9 @@ def create_app() -> FastAPI:
             logger.debug(f"🔧 Vision model check: is_vision_model={is_vision_model}, model_type={getattr(loaded_model.mlx_wrapper, 'model_type', 'unknown') if loaded_model else 'no_model'}")
 
             # Always use non-streaming mode
-            logger.debug(f"🔧 Request stream setting: {request.stream} (forcing non-streaming)")
+            # logger.debug(f"🔧 Request stream setting: {request.stream} (forcing non-streaming)")
 
             # Always use non-streaming response (streaming disabled)
-            # Add generation timeout for problematic models
-            generation_timeout = 30 if is_problematic_model else 120  # 30s for problematic models, 2min for others
-            logger.info(f"Using generation timeout: {generation_timeout}s for model {request.model}")
             
             if is_vision_model:
                 # For vision models, process images and pass structured messages
@@ -3266,41 +3202,20 @@ def create_app() -> FastAPI:
                 # For text models, format to a string and generate
                 prompt_string = await _apply_chat_template(loaded_model.mlx_wrapper.tokenizer, chat_messages, request.model)
                 
-                # Add explicit stop sequences and custom generation logic for problematic models
-                if has_tools and is_problematic_model:
-                    # Add strong stop instruction
-                    stop_instruction = "\n\nCRITICAL: Use EXACTLY ONE tool call. Do not repeat. Stop after the first tool call."
-                    prompt_string += stop_instruction
-                    logger.info(f"Added ultra-strict repetition prevention instruction for {request.model}")
-                    
-                    # For problematic models, use custom generation with early stopping
-                    logger.info(f"Using custom generation with early stopping for {request.model}")
-                    try:
-                        import asyncio
-                        result = await asyncio.wait_for(
-                            _generate_with_early_tool_stopping(request.model, prompt_string, config, loaded_model),
-                            timeout=generation_timeout
-                        )
-                    except asyncio.TimeoutError:
-                        logger.error(f"Custom generation timeout ({generation_timeout}s) exceeded for {request.model}")
-                        raise HTTPException(
-                            status_code=status.HTTP_408_REQUEST_TIMEOUT,
-                            detail=f"Model generation took too long (>{generation_timeout}s). This may indicate repetitive output."
-                        )
-                else:
-                    # Normal generation for non-problematic models
-                    try:
-                        import asyncio
-                        result = await asyncio.wait_for(
-                            queued_generate_text(request.model, prompt_string, config),
-                            timeout=generation_timeout
-                        )
-                    except asyncio.TimeoutError:
-                        logger.error(f"Generation timeout ({generation_timeout}s) exceeded for {request.model}")
-                        raise HTTPException(
-                            status_code=status.HTTP_408_REQUEST_TIMEOUT,
-                            detail=f"Model generation took too long (>{generation_timeout}s). This may indicate repetitive output."
-                        )
+                # Text generation
+                generation_timeout = 30
+                try:
+                    import asyncio
+                    result = await asyncio.wait_for(
+                        queued_generate_text(request.model, prompt_string, config),
+                        timeout=generation_timeout
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"Generation timeout ({generation_timeout}s) exceeded for {request.model}")
+                    raise HTTPException(
+                        status_code=status.HTTP_408_REQUEST_TIMEOUT,
+                        detail=f"Model generation took too long (>{generation_timeout}s). This may indicate repetitive output."
+                    )
                 
 
                 if not result:
@@ -3309,101 +3224,11 @@ def create_app() -> FastAPI:
                         detail="Generation failed and returned no result."
                     )
                 
-                # Check for tool calls in the response if tools are available
-                tool_calls = None
-                finish_reason = "stop"
-                final_response_text = result.text
-                
-                if has_tools and tool_executor and tool_executor.has_available_tools():
-                    # Log the raw response text for debugging
-                    logger.info(f"🔧 [TOOL-DEBUG] Raw model response length: {len(result.text)} characters")
-                    logger.info(f"🔧 [TOOL-DEBUG] Response preview: {repr(result.text[:500])}")
-                    
-                    # EMERGENCY: Truncate extremely long responses with repetitive tool calls BEFORE parsing
-                    # More aggressive thresholds for problematic models
-                    response_text = result.text
-                    length_threshold = 2000 if is_problematic_model else 5000
-                    call_threshold = 3 if is_problematic_model else 5
-                    
-                    if len(response_text) > length_threshold:
-                        tool_call_count = response_text.count("TOOL_CALL:")
-                        if tool_call_count > call_threshold:
-                            logger.error(f"🚨 EMERGENCY TRUNCATION: {tool_call_count} TOOL_CALLs in {len(response_text)} chars - truncating to prevent hang")
-                            
-                            # For problematic models, keep only 2 tool calls
-                            max_calls_to_keep = 2 if is_problematic_model else 3
-                            
-                            # Find positions of first few tool calls
-                            truncation_pos = 0
-                            for i in range(max_calls_to_keep):
-                                pos = response_text.find("TOOL_CALL:", truncation_pos)
-                                if pos == -1:
-                                    break
-                                truncation_pos = pos + 1
-                            
-                            # Find the end of the Nth tool call (look for next TOOL_CALL or end)
-                            next_call_pos = response_text.find("TOOL_CALL:", truncation_pos + 100)
-                            if next_call_pos != -1:
-                                response_text = response_text[:next_call_pos]
-                            else:
-                                response_text = response_text[:truncation_pos + 200]  # Keep some extra chars
-                            
-                            logger.error(f"🚨 Response truncated from {len(result.text)} to {len(response_text)} characters")
-                            logger.error(f"🚨 Truncated response preview: {repr(response_text[-200:])}")
-                    
-                    # Parse tool calls from the (possibly truncated) response
-                    detected_tool_calls = _parse_tool_calls_from_text(response_text)
-                    
-                    if detected_tool_calls:
-                        logger.info(f"🔧 [TOOL-DEBUG] Detected {len(detected_tool_calls)} tool calls after parsing")
-                        for i, call in enumerate(detected_tool_calls[:5]):
-                            logger.info(f"🔧 [TOOL-DEBUG] Call {i+1}: {call['function']['name']} with args {call['function']['arguments']}")
-                        
-                        # Check if this model supports standard OpenAI tool calling
-                        model_supports_openai_tools = _check_model_supports_standard_tool_calling(request.model)
-                        logger.info(f"🔧 [TOOL-DEBUG] Model {request.model} supports OpenAI tools: {model_supports_openai_tools}")
-                        
-                        if model_supports_openai_tools:
-                            # Standard OpenAI flow - return tool calls to client
-                            tool_calls = detected_tool_calls
-                            finish_reason = "tool_calls"
-                            final_response_text = ""  # Clear content for tool_calls response
-                            logger.info(f"Returning {len(tool_calls)} tool calls to client (OpenAI format)")
-                        else:
-                            # Multi-turn execution for models like Qwen3 that need results immediately
-                            logger.info(f"🔧 [TOOL-DEBUG] Executing tools server-side for model {request.model}")
-                            
-                            # Execute tools and continue conversation until final answer
-                            final_response_text = await _execute_tools_and_continue_conversation(
-                                model=request.model,
-                                original_messages=chat_messages,
-                                detected_tool_calls=detected_tool_calls,
-                                tool_executor=tool_executor,
-                                config=config,
-                                max_iterations=5  # Prevent infinite loops
-                            )
-                            
-                            finish_reason = "stop"
-                            logger.info(f"🔧 [TOOL-DEBUG] Multi-turn tool execution completed for {request.model}")
-                    else:
-                        logger.info(f"🔧 [TOOL-DEBUG] No tool calls detected in response")
-                
-                # Build the response message
+                # Build a simple response message (no server-side tool handling)
                 response_message = ChatCompletionMessage(
                     role="assistant",
-                    content=final_response_text if finish_reason == "stop" else ""
+                    content=result.text
                 )
-                
-                # Add tool calls to the message if any were detected
-                if tool_calls:
-                    response_message.tool_calls = [
-                        ToolCall(
-                            id=call["id"],
-                            type=call["type"],
-                            function=call["function"]
-                        )
-                        for call in tool_calls
-                    ]
 
                 response = ChatCompletionResponse(
                     id=completion_id,
@@ -3413,7 +3238,7 @@ def create_app() -> FastAPI:
                         ChatCompletionChoice(
                             index=0,
                             message=response_message,
-                            finish_reason=finish_reason
+                            finish_reason="stop"
                         )
                     ],
                     usage=ChatCompletionUsage(
@@ -4137,249 +3962,7 @@ def create_app() -> FastAPI:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error getting model capabilities: {str(e)}"
             )
-
-    @app.get("/v1/tools")
-    async def get_available_tools(db: Session = Depends(get_db_session)):
-        """Get available tools for the active RAG collection."""
-        try:
-            # Try to get the active RAG collection for tool execution
-            active_collection = db.query(RAGCollection).filter(RAGCollection.is_active == True).first()
-            if not active_collection:
-                return {
-                    "tools": [],
-                    "message": "No active RAG collection. Activate a collection to enable tools."
-                }
-            
-            tool_executor = get_tool_executor(active_collection.path)
-            if not tool_executor.has_available_tools():
-                return {
-                    "tools": [],
-                    "message": f"No tools available for collection path: {active_collection.path}"
-                }
-            
-            tools = tool_executor.get_tools_for_openai_request()
-            
-            return {
-                "tools": tools,
-                "collection_name": active_collection.name,
-                "collection_path": active_collection.path,
-                "tool_count": len(tools)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting available tools: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error getting tools: {str(e)}"
-            )
-
-    @app.get("/v1/tools/prompt/demo")
-    async def demo_tool_prompts(
-        include_examples: bool = True,
-        include_workflows: bool = True,
-        user_query: Optional[str] = None
-    ):
-        """Demonstration endpoint showing tool prompt generation capabilities."""
-        try:
-            from mlx_rag.tool_prompts import (
-                generate_tool_system_prompt, 
-                generate_contextual_prompt,
-                get_tool_usage_summary,
-                validate_tool_call_format
-            )
-            
-            # Sample tools for demonstration
-            sample_tools = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "list_directory",
-                        "description": "List files and directories in a specified path",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "path": {
-                                    "type": "string",
-                                    "description": "The directory path to list"
-                                },
-                                "recursive": {
-                                    "type": "boolean",
-                                    "description": "Whether to list files recursively",
-                                    "default": False
-                                },
-                                "pattern": {
-                                    "type": "string",
-                                    "description": "Optional file pattern to filter by (e.g., '*.py')"
-                                }
-                            },
-                            "required": ["path"]
-                        }
-                    }
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "read_file",
-                        "description": "Read the contents of a file",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "path": {
-                                    "type": "string",
-                                    "description": "The file path to read"
-                                }
-                            },
-                            "required": ["path"]
-                        }
-                    }
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "search_files",
-                        "description": "Search for content across multiple files",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string",
-                                    "description": "The search query or pattern"
-                                },
-                                "path": {
-                                    "type": "string",
-                                    "description": "The directory to search in"
-                                },
-                                "use_regex": {
-                                    "type": "boolean",
-                                    "description": "Whether to treat query as regex pattern",
-                                    "default": False
-                                }
-                            },
-                            "required": ["query", "path"]
-                        }
-                    }
-                }
-            ]
-            
-            results = {
-                "available_tools": len(sample_tools),
-                "tool_summary": get_tool_usage_summary(sample_tools)
-            }
-            
-            # Generate different types of prompts
-            if user_query:
-                # Generate contextual prompt for specific query
-                contextual_prompt = generate_contextual_prompt(
-                    sample_tools, 
-                    user_query, 
-                    conversation_history=[]
-                )
-                results["contextual_prompt"] = {
-                    "user_query": user_query,
-                    "prompt": contextual_prompt,
-                    "length": len(contextual_prompt)
-                }
-            else:
-                # Generate standard system prompt
-                system_prompt = generate_tool_system_prompt(
-                    sample_tools,
-                    context=None,
-                    include_examples=include_examples,
-                    include_workflows=include_workflows
-                )
-                results["system_prompt"] = {
-                    "prompt": system_prompt,
-                    "length": len(system_prompt),
-                    "includes_examples": include_examples,
-                    "includes_workflows": include_workflows
-                }
-            
-            # Demonstrate tool call validation
-            sample_calls = [
-                '{"function": "list_directory", "arguments": {"path": "."}}',
-                '{"function": "invalid_call", "arguments": {}}',
-                'invalid json',
-                '{"function": "read_file", "arguments": {"path": "README.md"}}'
-            ]
-            
-            validation_results = []
-            for call in sample_calls:
-                validation = validate_tool_call_format(call)
-                validation_results.append({
-                    "call": call,
-                    "validation": validation
-                })
-            
-            results["validation_demo"] = validation_results
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error in tool prompt demo: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Tool prompt demo failed: {str(e)}"
-            )
-    
-    @app.get("/v1/tools/prompt/generate")
-    async def generate_tool_prompt(
-        tools_json: Optional[str] = None,
-        context: Optional[str] = None,
-        user_query: Optional[str] = None,
-        include_examples: bool = True,
-        include_workflows: bool = True
-    ):
-        """Generate a tool-enabled system prompt for custom tool sets."""
-        try:
-            from mlx_rag.tool_prompts import generate_tool_system_prompt, generate_contextual_prompt
-            import json
-            
-            # Parse tools if provided
-            tools = []
-            if tools_json:
-                try:
-                    tools = json.loads(tools_json)
-                except json.JSONDecodeError as e:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Invalid JSON in tools_json parameter: {str(e)}"
-                    )
-            
-            # Generate appropriate prompt type
-            if user_query and tools:
-                prompt = generate_contextual_prompt(tools, user_query, conversation_history=[])
-                prompt_type = "contextual"
-            else:
-                prompt = generate_tool_system_prompt(
-                    tools, 
-                    context=context,
-                    include_examples=include_examples,
-                    include_workflows=include_workflows
-                )
-                prompt_type = "standard"
-            
-            return {
-                "prompt_type": prompt_type,
-                "prompt": prompt,
-                "length": len(prompt),
-                "tool_count": len(tools),
-                "parameters": {
-                    "context": context,
-                    "user_query": user_query,
-                    "include_examples": include_examples,
-                    "include_workflows": include_workflows
-                }
-            }
-            
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Error generating tool prompt: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Tool prompt generation failed: {str(e)}"
-            )
-
+               
     @app.get("/v1/debug/model/{model_id:path}")
     async def debug_model_info(model_id: str):
         """Debug endpoint to inspect model card content for size estimation troubleshooting."""
